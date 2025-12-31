@@ -1,0 +1,8 @@
+{
+  "name": "PMP - Pen Melody Pad Ultimate",
+  "description": "A production-ready AI-powered songwriting studio featuring real-time voice analysis, Gemini-driven lyric suggestions, and interactive AR visualization.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
