@@ -1,26 +1,31 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Genre } from '../types';
+import { Genre, AppScreen } from '../types';
 
 interface Props {
   genre: Genre;
+  currentScreen: AppScreen;
+  onNavigate: (screen: AppScreen) => void;
   onComplete: (scores: { rhymeScore: number; flowScore: number; energyScore: number; bpm: number }) => void;
   onSkip: () => void;
 }
 
-const VoiceAnalysis: React.FC<Props> = ({ genre, onComplete, onSkip }) => {
+const VoiceAnalysis: React.FC<Props> = ({ genre, currentScreen, onNavigate, onComplete, onSkip }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [timeLeft, setTimeLeft] = useState(15);
   const [isProcessing, setIsProcessing] = useState(false);
   const audioContext = useRef<AudioContext | null>(null);
   const analyser = useRef<AnalyserNode | null>(null);
-  const requestRef = useRef<number>();
+  // Fix: useRef expects 1 argument (initial value). 
+  const requestRef = useRef<number | null>(null);
   const [volume, setVolume] = useState<number[]>(new Array(40).fill(5));
 
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      // Fix: Some environments require 1 argument for AudioContext constructor. 
+      // Providing a sampleRate option to ensure compatibility.
+      audioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 44100 });
       analyser.current = audioContext.current.createAnalyser();
       const source = audioContext.current.createMediaStreamSource(stream);
       source.connect(analyser.current);
@@ -38,13 +43,8 @@ const VoiceAnalysis: React.FC<Props> = ({ genre, onComplete, onSkip }) => {
     if (!analyser.current) return;
     const dataArray = new Uint8Array(analyser.current.frequencyBinCount);
     analyser.current.getByteFrequencyData(dataArray);
-    
-    // Average volume mapping
-    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-    setVolume(prev => {
-      const next = [...prev.slice(1), Math.max(10, average * 0.8)];
-      return next;
-    });
+    const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+    setVolume(prev => [...prev.slice(1), Math.max(10, average * 0.8)]);
     requestRef.current = requestAnimationFrame(animate);
   };
 
@@ -61,21 +61,25 @@ const VoiceAnalysis: React.FC<Props> = ({ genre, onComplete, onSkip }) => {
   const handleComplete = () => {
     setIsRecording(false);
     setIsProcessing(true);
-    if (requestRef.current) cancelAnimationFrame(requestRef.current);
-
-    // Simulated AI processing delay
+    // Fix: Properly handle potential null when cancelling animation frame
+    if (requestRef.current !== null) {
+      cancelAnimationFrame(requestRef.current);
+    }
     setTimeout(() => {
-      onComplete({
-        rhymeScore: 88,
-        flowScore: 92,
-        energyScore: 85,
-        bpm: 94
-      });
+      onComplete({ rhymeScore: 88, flowScore: 92, energyScore: 85, bpm: 94 });
     }, 2000);
   };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in-95 duration-500">
+      <button 
+        onClick={() => onNavigate('onboarding')}
+        className="absolute top-8 left-8 p-4 glass rounded-2xl hover:bg-white/10 transition-all flex items-center gap-2 font-bold text-xs text-gray-400 hover:text-white"
+      >
+        <span className="material-icons-round">arrow_back</span>
+        Return Home
+      </button>
+
       <div className="max-w-md w-full glass-dark p-10 rounded-[40px] border border-purple-500/20 shadow-2xl relative">
         <header className="mb-10">
           <h2 className="text-3xl font-bold metallic-text uppercase tracking-tighter">Voice Your Style</h2>
@@ -85,7 +89,6 @@ const VoiceAnalysis: React.FC<Props> = ({ genre, onComplete, onSkip }) => {
         <div className="relative mb-12 flex justify-center items-center h-48">
           {!isProcessing ? (
             <>
-              {/* Mic Button Circle */}
               <div className={`absolute w-40 h-40 rounded-full bg-purple-500/10 border-2 border-purple-500/30 transition-all duration-700 ${isRecording ? 'scale-125 animate-pulse' : ''}`}></div>
               <button
                 onClick={isRecording ? handleComplete : startRecording}
@@ -102,7 +105,6 @@ const VoiceAnalysis: React.FC<Props> = ({ genre, onComplete, onSkip }) => {
           )}
         </div>
 
-        {/* Waveform Visualization */}
         <div className="flex items-end justify-center gap-1 h-12 mb-8 px-4 opacity-80">
           {volume.map((v, i) => (
             <div

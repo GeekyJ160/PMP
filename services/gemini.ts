@@ -1,25 +1,33 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Genre, LyricSuggestion } from "../types";
+import { Genre, LyricSuggestion, InstrumentalData } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const getLyricSuggestions = async (
   context: string,
   genre: Genre,
-  bpm?: number | null,
-  key?: string | null
+  instrumental?: InstrumentalData | null,
+  artistMode?: boolean
 ): Promise<LyricSuggestion[]> => {
-  const prompt = `Act as a world-class ${genre} songwriter. 
-  ${bpm ? `The track tempo is ${bpm} BPM.` : ''} ${key ? `The musical key is ${key}.` : ''}
-  Based on the current context: "${context}", generate 5 unique lyric suggestions.
-  Provide varied types: rhyme completions, flow improvements, deep metaphors, powerful punchlines, or catchy hooks.
-  Maintain the artistic vibe of a modern top-tier artist. Ensure the rhythm of the suggestions fits the ${bpm || 90} BPM tempo.`;
+  const ai = getAI();
+  const bpm = instrumental?.bpm;
+  const key = instrumental?.key;
+
+  const persona = artistMode 
+    ? "Act as an elite introspective R&B/Rap superstar like Drake. Use clever wordplay, emotional transparency, and references to city life. Prioritize melodic rap cadences."
+    : `Act as a world-class ${genre} songwriter.`;
+
+  const prompt = `${persona}
+  ${bpm ? `Tempo: ${bpm} BPM.` : ''} ${key ? `Key: ${key}.` : ''}
+  Based on this context: "${context}", generate 5 unique suggestions.
+  Include varied types: rhymes, flow completions, metaphors, or punchlines.
+  The suggestions must match the rhythm of ${bpm || 90} BPM.`;
 
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: prompt,
+      contents: { parts: [{ text: prompt }] },
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -28,9 +36,9 @@ export const getLyricSuggestions = async (
             type: Type.OBJECT,
             properties: {
               text: { type: Type.STRING },
-              type: { type: Type.STRING, description: "One of: rhyme, flow, metaphor, punchline, hook" },
-              score: { type: Type.NUMBER, description: "Match score out of 100" },
-              rating: { type: Type.NUMBER, description: "Star rating 1-5" }
+              type: { type: Type.STRING },
+              score: { type: Type.NUMBER },
+              rating: { type: Type.NUMBER }
             },
             required: ["text", "type", "score", "rating"]
           }
@@ -38,12 +46,9 @@ export const getLyricSuggestions = async (
       }
     });
 
-    if (response.text) {
-      return JSON.parse(response.text);
-    }
-    return [];
+    return response.text ? JSON.parse(response.text) : [];
   } catch (error) {
-    console.error("Gemini Error:", error);
+    console.error("Lyric AI Error:", error);
     return [];
   }
 };
@@ -54,63 +59,42 @@ export const getRhymeSuggestions = async (
   contextSnippet: string,
   bpm?: number | null
 ): Promise<string[]> => {
+  const ai = getAI();
   if (!word || word.length < 2) return [];
   
-  const prompt = `Act as an award-winning ${genre} lyricist.
-  The user is writing ${genre} lyrics and needs rhymes for the word: "${word}".
-  Tempo: ${bpm || 'standard'}.
-  Context: "${contextSnippet}"
-
-  Task: Provide 12-16 rhyme suggestions that are stylistically and contextually relevant.
-  For ${genre}, favor rhymes that fit a professional songwriting standard.
-  Return ONLY a JSON array of strings.`;
+  const prompt = `Act as an elite ${genre} lyricist. 
+  Word to rhyme: "${word}"
+  Context of surrounding lyrics: "${contextSnippet}"
+  Track Tempo: ${bpm ? bpm : 'Variable'}
+  
+  Task: Provide 16 rhymes. 
+  Crucial: The rhymes must make sense within the theme of the context snippet. 
+  Return as a simple JSON array of strings.`;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
+      model: "gemini-3-pro-preview",
+      contents: { parts: [{ text: prompt }] },
       config: {
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING }
-        }
+        responseSchema: { type: Type.ARRAY, items: { type: Type.STRING } }
       }
     });
-
-    if (response.text) {
-      const rhymes = JSON.parse(response.text);
-      return Array.isArray(rhymes) ? rhymes : [];
-    }
-    return [];
+    return response.text ? JSON.parse(response.text) : [];
   } catch (error) {
-    console.error("Rhyme Gemini Error:", error);
+    console.error("Rhyme AI Error:", error);
     return [];
   }
 };
 
-export const analyzeInstrumental = async (base64Audio: string): Promise<any> => {
-  const prompt = `Analyze this instrumental audio track precisely. 
-  Extract:
-  1. BPM (Beats Per Minute) - provide a single integer.
-  2. Musical Key (e.g., "G Minor", "C# Major") - be specific.
-  3. Energy Level (Scale 1-100).
-  4. Vibe Tags (e.g., "Melodic", "Dark", "Aggressive", "Soulful").
-  
-  Return the analysis as a JSON object.`;
+export const analyzeInstrumental = async (base64Audio: string, mimeType: string): Promise<any> => {
+  const ai = getAI();
+  const prompt = `Analyze this instrumental. Extract BPM (number), Key (string), Energy (1-100), and Vibe (array of 4 tags). Return as JSON.`;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: [
-        {
-          inlineData: {
-            mimeType: "audio/mp3",
-            data: base64Audio
-          }
-        },
-        { text: prompt }
-      ],
+      model: "gemini-2.5-flash-native-audio-preview-09-2025",
+      contents: [{ parts: [{ inlineData: { mimeType, data: base64Audio } }, { text: prompt }] }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -122,35 +106,6 @@ export const analyzeInstrumental = async (base64Audio: string): Promise<any> => 
             vibe: { type: Type.ARRAY, items: { type: Type.STRING } }
           },
           required: ["bpm", "key", "energy", "vibe"]
-        }
-      }
-    });
-    return response.text ? JSON.parse(response.text) : null;
-  } catch (err) {
-    console.error("Instrumental Analysis Error:", err);
-    return null;
-  }
-};
-
-export const analyzeAudioCadence = async (base64Audio: string): Promise<any> => {
-  const prompt = "Analyze the flow, rhyme density, and energy of this vocal performance. Return a numeric score for each.";
-  
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            rhymeScore: { type: Type.NUMBER },
-            flowScore: { type: Type.NUMBER },
-            energyScore: { type: Type.NUMBER },
-            bpm: { type: Type.NUMBER },
-            feedback: { type: Type.STRING }
-          },
-          required: ["rhymeScore", "flowScore", "energyScore", "bpm", "feedback"]
         }
       }
     });

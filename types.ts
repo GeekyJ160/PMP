@@ -15,10 +15,23 @@ export interface LyricSuggestion {
   rating: number;
 }
 
+export interface InstrumentalData {
+  url: string;
+  name: string;
+  bpm: number | null;
+  key: string | null;
+  energy: number | null;
+  vibe: string[];
+  mimeType: string;
+}
+
 export interface UserState {
   genre: Genre;
   rhymeScore: number;
   flowScore: number;
   energyScore: number;
   bpm: number;
+  instrumental: InstrumentalData | null;
+  artistModeEnabled: boolean;
+  autoSuggest: boolean;
 }

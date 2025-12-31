@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UserState, Genre, LyricSuggestion } from '../types';
+import { UserState, Genre, LyricSuggestion, InstrumentalData, AppScreen } from '../types';
 import { getLyricSuggestions, getRhymeSuggestions, analyzeInstrumental } from '../services/gemini';
 import SuggestionCard from './SuggestionCard';
 import BeatVisualizer from './BeatVisualizer';
@@ -8,418 +8,306 @@ import BeatVisualizer from './BeatVisualizer';
 interface Props {
   userState: UserState;
   lyrics: string;
+  currentScreen: AppScreen;
+  onNavigate: (screen: AppScreen) => void;
   setLyrics: (val: string) => void;
   onShowStats: () => void;
+  onUpdateInstrumental: (data: InstrumentalData | null) => void;
 }
 
-const Studio: React.FC<Props> = ({ userState, lyrics, setLyrics, onShowStats }) => {
+const Studio: React.FC<Props> = ({ userState, lyrics, currentScreen, onNavigate, setLyrics, onShowStats, onUpdateInstrumental }) => {
   const [suggestions, setSuggestions] = useState<LyricSuggestion[]>([]);
   const [rhymes, setRhymes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [rhymesLoading, setRhymesLoading] = useState(false);
-  const [autoComplete, setAutoComplete] = useState(true);
-  const [currentWord, setCurrentWord] = useState('');
   const [activeTab, setActiveTab] = useState<'ai' | 'rhymes'>('ai');
   const [targetRange, setTargetRange] = useState<{ start: number; end: number } | null>(null);
+  const [currentWord, setCurrentWord] = useState('');
   
-  // Instrumental & Beat Lab State
-  const [instrumentalUrl, setInstrumentalUrl] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [analyzingInstrumental, setAnalyzingInstrumental] = useState(false);
-  const [detectedBpm, setDetectedBpm] = useState<number | null>(null);
-  const [detectedKey, setDetectedKey] = useState<string | null>(null);
-  const [vibeTags, setVibeTags] = useState<string[]>([]);
+  const [artistMode, setArtistMode] = useState(userState.artistModeEnabled);
+  const [autoSuggest, setAutoSuggest] = useState(userState.autoSuggest);
+  const [showAR, setShowAR] = useState(false);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const highlightRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  const renderHighlightedText = () => {
-    if (!currentWord || !targetRange) return lyrics;
-    const { start, end } = targetRange;
-    return (
-      <>
-        {lyrics.slice(0, start)}
-        <span className="bg-purple-500/30 border-b-2 border-purple-400 text-transparent rounded-sm">
-          {lyrics.slice(start, end)}
-        </span>
-        {lyrics.slice(end)}
-      </>
-    );
+  // Persistence & Stats
+  const wordCount = lyrics.trim().split(/\s+/).filter(Boolean).length;
+  const charCount = lyrics.length;
+
+  const exportLyrics = () => {
+    const blob = new Blob([lyrics], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pmp_project_${Date.now()}.txt`;
+    a.click();
   };
 
   const fetchSuggestions = useCallback(async () => {
-    if (!lyrics.trim() || lyrics.length < 10) return;
+    if (!lyrics.trim() || lyrics.length < 5) return;
     setLoading(true);
-    const res = await getLyricSuggestions(lyrics, userState.genre, detectedBpm, detectedKey);
+    const res = await getLyricSuggestions(lyrics, userState.genre, userState.instrumental, artistMode);
     setSuggestions(res);
     setLoading(false);
-  }, [lyrics, userState.genre, detectedBpm, detectedKey]);
+  }, [lyrics, userState.genre, userState.instrumental, artistMode]);
+
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeys = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); fetchSuggestions(); }
+      if (e.ctrlKey && e.key === 'e') { e.preventDefault(); exportLyrics(); }
+      if (e.ctrlKey && e.key === 's') { e.preventDefault(); alert("Project Saved to LocalStorage"); }
+    };
+    window.addEventListener('keydown', handleKeys);
+    return () => window.removeEventListener('keydown', handleKeys);
+  }, [lyrics, fetchSuggestions]);
+
+  // Contextual Rhymes logic
+  useEffect(() => {
+    const fetchRhymes = async () => {
+      if (!currentWord || currentWord.length < 2) { setRhymes([]); return; }
+      setRhymesLoading(true);
+      const start = Math.max(0, (targetRange?.start || 0) - 100);
+      const end = Math.min(lyrics.length, (targetRange?.end || 0) + 100);
+      const context = lyrics.slice(start, end);
+      const res = await getRhymeSuggestions(currentWord, userState.genre, context, userState.instrumental?.bpm);
+      setRhymes(res);
+      setRhymesLoading(false);
+    };
+    const delay = setTimeout(fetchRhymes, 500);
+    return () => clearTimeout(delay);
+  }, [currentWord, lyrics, targetRange, userState.genre, userState.instrumental?.bpm]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = (reader.result as string).split(',')[1];
+      const analysis = await analyzeInstrumental(base64, file.type || 'audio/mpeg');
+      onUpdateInstrumental({
+        url: URL.createObjectURL(file), name: file.name, bpm: analysis?.bpm || null,
+        key: analysis?.key || null, energy: analysis?.energy || null,
+        vibe: analysis?.vibe || [], mimeType: file.type || 'audio/mpeg'
+      });
+    };
+    reader.readAsDataURL(file);
+  };
 
   const detectWordAtCursor = useCallback(() => {
     if (!textareaRef.current) return;
-    const startPos = textareaRef.current.selectionStart;
-    const endPos = textareaRef.current.selectionEnd;
-    const text = textareaRef.current.value;
-    
-    let word = '';
-    let rangeStart = startPos;
-    let rangeEnd = endPos;
-    
-    if (startPos !== endPos) {
-      word = text.slice(startPos, endPos).trim();
-    } else {
-      rangeStart = startPos;
-      while (rangeStart > 0 && /\w/.test(text[rangeStart - 1])) rangeStart--;
-      rangeEnd = startPos;
-      while (rangeEnd < text.length && /\w/.test(text[rangeEnd])) rangeEnd++;
-      word = text.slice(rangeStart, rangeEnd).trim();
-    }
-    
+    const { selectionStart, value } = textareaRef.current;
+    let start = selectionStart;
+    while (start > 0 && /[\w'-]/.test(value[start - 1])) start--;
+    let end = selectionStart;
+    while (end < value.length && /[\w'-]/.test(value[end])) end++;
+    const word = value.slice(start, end).trim();
     if (word && /^[a-zA-Z0-9'-]+$/.test(word)) {
       setCurrentWord(word);
-      setTargetRange({ start: rangeStart, end: rangeEnd });
+      setTargetRange({ start, end });
     } else {
       setCurrentWord('');
       setTargetRange(null);
     }
   }, []);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setAnalyzingInstrumental(true);
-    const url = URL.createObjectURL(file);
-    setInstrumentalUrl(url);
-
-    // AI Analysis
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = (reader.result as string).split(',')[1];
-      const analysis = await analyzeInstrumental(base64);
-      if (analysis) {
-        setDetectedBpm(analysis.bpm);
-        setDetectedKey(analysis.key);
-        setVibeTags(analysis.vibe || []);
-      }
-      setAnalyzingInstrumental(false);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const togglePlayback = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
-    setIsPlaying(!isPlaying);
-  };
-
-  const syncScroll = () => {
-    if (textareaRef.current && highlightRef.current) {
-      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
-    }
-  };
-
   useEffect(() => {
-    const delay = setTimeout(() => {
-      if (autoComplete) fetchSuggestions();
-    }, 2500);
+    const delay = setTimeout(() => { if (autoSuggest) fetchSuggestions(); }, 3000);
     return () => clearTimeout(delay);
-  }, [lyrics, fetchSuggestions, autoComplete]);
-
-  useEffect(() => {
-    const fetchRhymes = async () => {
-      if (!currentWord || currentWord.length < 2) {
-        setRhymes([]);
-        return;
-      }
-      setRhymesLoading(true);
-      const snippetStart = Math.max(0, (targetRange?.start || 0) - 200);
-      const snippetEnd = Math.min(lyrics.length, (targetRange?.end || 0) + 200);
-      const res = await getRhymeSuggestions(currentWord, userState.genre, lyrics.slice(snippetStart, snippetEnd), detectedBpm);
-      setRhymes(res);
-      setRhymesLoading(false);
-    };
-
-    const delay = setTimeout(fetchRhymes, 400);
-    return () => clearTimeout(delay);
-  }, [currentWord, userState.genre, targetRange, detectedBpm]);
-
-  const applyRhyme = (rhyme: string) => {
-    if (!textareaRef.current || !targetRange) return;
-    const { start, end } = targetRange;
-    const text = textareaRef.current.value;
-    const newText = text.slice(0, start) + rhyme + text.slice(end);
-    setLyrics(newText);
-    const newCursorPos = start + rhyme.length;
-    
-    requestAnimationFrame(() => {
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
-        detectWordAtCursor();
-      }
-    });
-  };
+  }, [lyrics, fetchSuggestions, autoSuggest]);
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-[#0F0F23]">
-      <audio 
-        ref={audioRef} 
-        src={instrumentalUrl || ''} 
-        loop 
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-      />
-      
-      {/* Sidebar - Beat Lab & Tools */}
-      <aside className="w-full md:w-80 glass-dark border-r border-white/5 p-6 flex flex-col gap-6 overflow-y-auto custom-scroll">
+    <div className="min-h-screen flex flex-col md:flex-row bg-[#0A0A1A] overflow-hidden font-['Inter']">
+      <audio ref={audioRef} src={userState.instrumental?.url || ''} loop />
+      <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileUpload} className="hidden" />
+
+      {/* SIDEBAR */}
+      <aside className="hidden lg:flex w-72 bg-[#121226]/50 border-r border-white/5 p-5 flex-col gap-6 overflow-y-auto custom-scroll">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-purple-600 flex items-center justify-center shadow-lg">
-            <span className="material-icons-round text-white">edit_note</span>
-          </div>
+          <div className="w-10 h-10 rounded-lg bg-purple-600 flex items-center justify-center"><span className="material-icons-round text-white">edit_note</span></div>
           <div>
-            <h1 className="font-bold tracking-tight">PMP STUDIO</h1>
-            <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-black uppercase tracking-widest">
-              {userState.genre} MODE
-            </span>
+            <h1 className="font-black text-xl tracking-tighter text-white font-['Orbitron']">PMP STUDIO</h1>
+            <div className="bg-purple-900/40 px-2 py-0.5 rounded text-[8px] font-black text-purple-300 uppercase tracking-widest inline-block border border-purple-500/20">RAP MODE</div>
           </div>
         </div>
 
-        {/* Instrumental Section */}
-        <div className="glass p-5 rounded-[2rem] border border-white/10 space-y-4">
-          <div className="flex justify-between items-center px-1">
-             <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Beat Lab</span>
-             {analyzingInstrumental && (
-               <div className="flex items-center gap-2">
-                 <span className="text-[10px] text-purple-400 font-mono animate-pulse uppercase">AI SCANNING...</span>
-                 <div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
-               </div>
-             )}
-          </div>
-          
-          {!instrumentalUrl ? (
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full py-10 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-3 hover:bg-white/5 transition-all group"
-            >
-              <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-purple-600/20 transition-all">
-                <span className="material-icons-round text-gray-600 group-hover:text-purple-400">add</span>
+        <div className="space-y-4">
+          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">Beat Lab</label>
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className="cursor-pointer aspect-video rounded-2xl border-2 border-dashed border-white/5 bg-white/5 hover:bg-white/10 flex flex-col items-center justify-center gap-2 transition-all group"
+          >
+            {userState.instrumental ? (
+              <div className="text-center p-4">
+                <span className="material-icons-round text-purple-400">audiotrack</span>
+                <p className="text-[9px] font-bold text-white truncate w-40 mt-1">{userState.instrumental.name}</p>
+                <p className="text-[8px] text-purple-400/60 uppercase">{userState.instrumental.bpm} BPM • {userState.instrumental.key}</p>
               </div>
-              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider group-hover:text-gray-300">Drop Instrumental</span>
-              <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileUpload} className="hidden" />
+            ) : (
+              <>
+                <span className="material-icons-round text-gray-500 group-hover:text-purple-400 text-3xl">add</span>
+                <span className="text-[10px] font-bold text-gray-500 uppercase">Drop Instrumental</span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between p-4 glass rounded-2xl bg-[#1E1E38]/40 border-white/5">
+            <div className="flex items-center gap-3">
+              <span className="material-icons-round text-gray-400">mic_external_on</span>
+              <div>
+                <p className="text-xs font-bold text-white">Drake Mode</p>
+                <p className="text-[8px] text-gray-500">AI ARTIST STYLE</p>
+              </div>
+            </div>
+            <button onClick={() => setArtistMode(!artistMode)} className={`w-10 h-5 rounded-full relative transition-all ${artistMode ? 'bg-purple-600' : 'bg-gray-700'}`}>
+              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${artistMode ? 'right-1' : 'left-1'}`} />
             </button>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex items-center gap-4 bg-white/5 p-3 rounded-2xl border border-white/5">
-                <button 
-                  onClick={togglePlayback}
-                  className="w-14 h-14 rounded-full bg-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20 hover:scale-105 active:scale-95 transition-all"
-                >
-                  <span className="material-icons-round text-white text-3xl">{isPlaying ? 'pause' : 'play_arrow'}</span>
-                </button>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-black truncate text-gray-200 uppercase tracking-tight">Active Beat</p>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {detectedBpm ? (
-                      <span className="text-[9px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-lg font-black border border-blue-500/20">{detectedBpm} BPM</span>
-                    ) : (
-                      <span className="text-[9px] bg-gray-500/10 text-gray-500 px-2 py-0.5 rounded-lg font-black italic">BPM ???</span>
-                    )}
-                    {detectedKey && (
-                      <span className="text-[9px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-lg font-black border border-green-500/20">{detectedKey}</span>
-                    )}
-                  </div>
-                </div>
-                <button onClick={() => {setInstrumentalUrl(null); setDetectedBpm(null); setDetectedKey(null); setIsPlaying(false);}} className="text-gray-600 hover:text-red-400 transition-colors p-2">
-                   <span className="material-icons-round text-sm">close</span>
-                </button>
-              </div>
-              
-              <div className="px-1">
-                <BeatVisualizer active={isPlaying} />
-              </div>
-
-              {vibeTags.length > 0 && (
-                <div className="flex flex-wrap gap-1 pt-2">
-                  {vibeTags.map(tag => (
-                    <span key={tag} className="text-[8px] text-gray-500 uppercase font-black border border-white/5 px-2 py-0.5 rounded bg-black/20">#{tag}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          </div>
         </div>
 
-        <div className="space-y-3">
-          <button onClick={onShowStats} className="w-full flex items-center gap-3 p-4 rounded-2xl glass hover:bg-white/10 transition-all text-sm font-medium">
-            <span className="material-icons-round text-blue-400">insights</span>
-            Studio Analytics
+        <div className="space-y-2">
+          <button onClick={onShowStats} className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:bg-white/5 text-xs font-bold text-gray-400 transition-all">
+            <span className="material-icons-round text-purple-500 text-sm">auto_graph</span> Studio Analytics
           </button>
-          <button className="w-full flex items-center gap-3 p-4 rounded-2xl glass hover:bg-white/10 transition-all text-sm font-medium">
-            <span className="material-icons-round text-yellow-400">visibility</span>
-            AR Lyric View
+          <button onClick={exportLyrics} className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:bg-white/5 text-xs font-bold text-gray-400 transition-all">
+            <span className="material-icons-round text-purple-500 text-sm">file_download</span> Export Lyrics
+          </button>
+          <button onClick={() => setShowAR(true)} className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:bg-white/5 text-xs font-bold text-gray-400 transition-all">
+            <span className="material-icons-round text-purple-500 text-sm">visibility</span> AR Lyric View
           </button>
         </div>
 
-        <div className="mt-auto p-5 rounded-3xl bg-purple-600/10 border border-purple-500/20">
-            <div className="flex items-center gap-3 mb-2">
-                <span className="material-icons-round text-purple-400 text-sm">auto_awesome</span>
-                <h4 className="text-[10px] font-black text-purple-300 uppercase tracking-widest">Muse Logic</h4>
-            </div>
-            <p className="text-[10px] text-gray-400 leading-relaxed font-medium uppercase tracking-wider">
-                {instrumentalUrl ? `Musical DNA detected. Suggestions calibrated to ${detectedBpm || 'N/A'} BPM rhythmics and ${detectedKey || 'current'} scales.` : 'Upload a beat to sync AI cadence with musical key and BPM for precision writing.'}
-            </p>
+        <div className="mt-4 p-4 bg-white/5 rounded-2xl">
+          <h4 className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-3">Shortcuts</h4>
+          <div className="space-y-2 font-mono text-[9px]">
+            <div className="flex justify-between text-gray-500"><span>Suggest</span><span className="text-purple-400">Ctrl+Enter</span></div>
+            <div className="flex justify-between text-gray-500"><span>Export</span><span className="text-purple-400">Ctrl+E</span></div>
+            <div className="flex justify-between text-gray-500"><span>Save</span><span className="text-purple-400">Ctrl+S</span></div>
+          </div>
+        </div>
+
+        <div className="mt-auto p-4 bg-purple-900/10 border border-purple-500/10 rounded-2xl">
+           <h4 className="text-[9px] font-black text-purple-400 uppercase tracking-widest flex items-center gap-2 mb-2">
+             <span className="material-icons-round text-xs">psychology</span> Muse Logic
+           </h4>
+           <p className="text-[8px] text-gray-400 leading-relaxed uppercase">
+             Upload a beat to sync AI cadence with musical key and BPM for surgical accuracy.
+           </p>
         </div>
       </aside>
 
-      {/* Main Content - Editor & Insights */}
-      <main className="flex-1 flex flex-col p-6 h-screen overflow-hidden">
-        <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <h2 className="text-2xl font-bold tracking-tight">Lyrical Canvas</h2>
-              {instrumentalUrl && (
-                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/10 border border-green-500/20 animate-pulse">
-                   <div className="w-1.5 h-1.5 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]"></div>
-                   <span className="text-[9px] font-black text-green-300 uppercase tracking-widest">Beat Sync Active</span>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-3 text-xs font-mono text-gray-400 uppercase tracking-widest">
-                <div className={`w-2 h-2 rounded-full ${autoComplete ? 'bg-green-500' : 'bg-gray-700'}`}></div>
-                Auto-Suggest: {autoComplete ? 'ON' : 'OFF'}
-              </div>
-              <button 
-                onClick={() => setAutoComplete(!autoComplete)}
-                className={`w-12 h-6 rounded-full relative transition-all duration-300 ${autoComplete ? 'bg-purple-600' : 'bg-gray-800'}`}
-              >
-                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-md ${autoComplete ? 'right-1' : 'left-1'}`}></div>
-              </button>
-            </div>
+      {/* MAIN CANVAS */}
+      <main className="flex-1 flex flex-col relative bg-[#0A0A1A]">
+        <header className="px-8 py-6 flex justify-between items-center border-b border-white/5 bg-black/20">
+          <h2 className="text-xl font-bold text-white tracking-tight font-['Orbitron']">Lyrical Canvas</h2>
+          <div className="flex items-center gap-4">
+            <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Auto-Suggest: {autoSuggest ? 'ON' : 'OFF'}</span>
+            <button onClick={() => setAutoSuggest(!autoSuggest)} className={`w-10 h-5 rounded-full relative transition-all ${autoSuggest ? 'bg-purple-600' : 'bg-gray-700'}`}>
+              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${autoSuggest ? 'right-1' : 'left-1'}`} />
+            </button>
           </div>
+        </header>
 
-          <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden">
-            {/* Editor Pane */}
-            <div className="flex-1 relative glass-dark rounded-[2.5rem] border border-white/5 overflow-hidden flex flex-col shadow-inner">
-               <div 
-                 ref={highlightRef} 
-                 aria-hidden="true" 
-                 className="absolute inset-0 p-10 text-xl md:text-2xl leading-[1.8] text-transparent pointer-events-none whitespace-pre-wrap break-words overflow-hidden" 
-                 style={{ font: 'inherit' }}
-               >
-                 {renderHighlightedText()}
-                 <div className="inline-block w-px h-px opacity-0"></div>
-               </div>
-
-               <textarea
-                 ref={textareaRef}
-                 className="flex-1 w-full bg-transparent border-none focus:ring-0 p-10 text-xl md:text-2xl leading-[1.8] text-gray-100 font-medium placeholder-gray-800 resize-none overflow-y-auto z-10 custom-scroll"
-                 value={lyrics}
-                 onChange={(e) => setLyrics(e.target.value)}
-                 onKeyUp={detectWordAtCursor}
-                 onMouseUp={detectWordAtCursor}
-                 onSelect={detectWordAtCursor}
-                 onScroll={syncScroll}
-                 placeholder="Lyrical exploration starts here..."
-                 spellCheck={false}
-               />
-               
-               <div className="p-4 bg-black/40 border-t border-white/5 flex items-center justify-between text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase z-20 backdrop-blur-md">
-                 <div className="flex gap-8">
-                    <span className="flex items-center gap-1.5"><span className="text-gray-700">WORDS</span> {lyrics.split(/\s+/).filter(Boolean).length}</span>
-                    <span className="flex items-center gap-1.5"><span className="text-gray-700">CHARS</span> {lyrics.length}</span>
-                    {currentWord && <span className="text-purple-400 font-black animate-pulse flex items-center gap-1"><span className="w-1 h-1 bg-purple-400 rounded-full"></span> FOCUS: {currentWord}</span>}
-                 </div>
-                 <div className="flex items-center gap-2 text-purple-400 font-black">
-                    <span className="material-icons-round text-xs animate-spin-slow">auto_fix_high</span>
-                    AI MAPPING
-                 </div>
-               </div>
-            </div>
-
-            {/* Intelligence Side Panel */}
-            <div className="w-full md:w-80 flex flex-col gap-0 overflow-hidden glass-dark rounded-[2.5rem] border border-white/5 shadow-2xl">
-              <div className="flex border-b border-white/10 p-1">
-                <button 
-                  onClick={() => setActiveTab('ai')} 
-                  className={`flex-1 py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all rounded-2xl ${activeTab === 'ai' ? 'text-purple-400 bg-purple-500/10' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                  Insights
-                </button>
-                <button 
-                  onClick={() => setActiveTab('rhymes')} 
-                  className={`flex-1 py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all rounded-2xl ${activeTab === 'rhymes' ? 'text-purple-400 bg-purple-500/10' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                  Rhyme Dict
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scroll">
-                {activeTab === 'ai' ? (
-                  <>
-                    <div className="flex items-center justify-between sticky top-0 bg-[#0F0F23]/90 backdrop-blur-md z-10 py-2">
-                       <h3 className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Lyrical Muse</h3>
-                       {loading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>}
-                    </div>
-                    {suggestions.length === 0 && !loading && (
-                      <div className="py-20 text-center opacity-40">
-                        <span className="material-icons-round text-5xl mb-3">lightbulb</span>
-                        <p className="text-[10px] font-black uppercase tracking-widest">Write more to get ideas</p>
-                      </div>
-                    )}
-                    {suggestions.map((s, i) => (
-                      <SuggestionCard key={i} suggestion={s} onInsert={(txt) => setLyrics(lyrics + (lyrics.endsWith('\n') ? '' : '\n') + txt)} delay={i * 100} />
-                    ))}
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between sticky top-0 bg-[#0F0F23]/90 backdrop-blur-md z-10 py-2">
-                       <h3 className="text-[10px] font-black text-gray-600 uppercase tracking-widest">
-                         {currentWord ? `Rhymes for "${currentWord}"` : 'Dictionary'}
-                       </h3>
-                       {rhymesLoading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>}
-                    </div>
-                    
-                    {!currentWord && (
-                      <div className="py-20 text-center opacity-40">
-                        <span className="material-icons-round text-5xl mb-3">radar</span>
-                        <p className="text-[10px] font-black uppercase tracking-widest">Tap a word to start</p>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-2">
-                      {rhymes.map((rhyme, idx) => (
-                        <button 
-                          key={idx} 
-                          onClick={() => applyRhyme(rhyme)} 
-                          className="group relative px-3 py-3 rounded-xl glass hover:bg-purple-600/20 text-xs font-bold text-gray-300 hover:text-white transition-all border border-white/5 truncate uppercase tracking-tighter"
-                        >
-                          {rhyme}
-                        </button>
-                      ))}
-                    </div>
-                    
-                    {currentWord && rhymes.length > 0 && (
-                      <div className="mt-4 p-4 rounded-2xl bg-white/5 border border-white/5">
-                        <p className="text-[9px] text-gray-500 leading-relaxed font-bold uppercase tracking-widest">
-                          Tapping a rhyme will automatically replace your focused word in the editor.
-                        </p>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
+        <div className="flex-1 px-12 py-4 relative group">
+          <div ref={backdropRef} className="absolute inset-0 editor-metrics font-mono text-transparent pointer-events-none select-none overflow-y-auto whitespace-pre-wrap">
+            {targetRange && currentWord ? (
+              <>{lyrics.slice(0, targetRange.start)}<mark className="target-highlight">{lyrics.slice(targetRange.start, targetRange.end)}</mark>{lyrics.slice(targetRange.end)}</>
+            ) : lyrics}
           </div>
+          <textarea
+            ref={textareaRef}
+            className="w-full h-full bg-transparent border-none focus:ring-0 editor-metrics text-gray-300 font-mono placeholder-gray-800 resize-none custom-scroll"
+            value={lyrics}
+            onChange={(e) => setLyrics(e.target.value)}
+            onKeyUp={detectWordAtCursor}
+            onScroll={() => backdropRef.current && (backdropRef.current.scrollTop = textareaRef.current!.scrollTop)}
+            placeholder="Started from the bottom now we're here..."
+            spellCheck={false}
+          />
         </div>
+
+        <footer className="px-8 py-4 bg-black/40 border-t border-white/5 flex items-center justify-between text-[9px] text-gray-600 font-black tracking-widest uppercase">
+           <div className="flex gap-10 items-center">
+              <span>Words {wordCount}</span>
+              <span>Chars {charCount}</span>
+           </div>
+           <div className="flex items-center gap-2 text-gray-500">
+             <span className="material-icons-round text-[12px] text-purple-600">auto_awesome</span>
+             AI Mapping
+           </div>
+        </footer>
       </main>
+
+      {/* RIGHT SIDEBAR */}
+      <aside className="w-80 bg-[#121226]/80 border-l border-white/5 flex flex-col">
+        <div className="flex p-4 gap-2 bg-black/20">
+          <button 
+            onClick={() => setActiveTab('ai')}
+            className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${activeTab === 'ai' ? 'bg-[#1E1E38] text-white border border-white/10' : 'text-gray-500'}`}
+          >Insights</button>
+          <button 
+            onClick={() => setActiveTab('rhymes')}
+            className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${activeTab === 'rhymes' ? 'bg-[#1E1E38] text-white border border-white/10' : 'text-gray-500'}`}
+          >Rhyme Dict</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 custom-scroll space-y-4">
+          {activeTab === 'ai' ? (
+            <>
+              <h4 className="text-[10px] font-black text-gray-600 uppercase tracking-widest mb-4">Lyrical Muse</h4>
+              {suggestions.map((s, i) => (
+                <SuggestionCard key={i} suggestion={s} onInsert={(txt) => setLyrics(lyrics + '\n' + txt)} delay={i * 100} />
+              ))}
+              {suggestions.length === 0 && <div className="h-full flex flex-col items-center justify-center opacity-20 text-center py-40">
+                <span className="material-icons-round text-4xl mb-2">lightbulb</span>
+                <p className="text-[10px] font-bold uppercase tracking-widest">Write more to get ideas</p>
+              </div>}
+            </>
+          ) : (
+            <div className="space-y-4">
+              <h4 className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Contextual Vault</h4>
+              {currentWord ? (
+                <div className="p-4 bg-purple-500/10 rounded-2xl border border-purple-500/20">
+                  <p className="text-[8px] font-black text-purple-400 uppercase mb-1 tracking-widest">Targeting</p>
+                  <p className="text-sm font-bold text-white">{currentWord}</p>
+                </div>
+              ) : (
+                <div className="p-10 text-center opacity-20 italic text-[10px] uppercase">Tap any word to find rhymes</div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                {rhymes.map((r, i) => (
+                  <button key={i} onClick={() => {
+                    const newLyrics = lyrics.replace(currentWord, r);
+                    setLyrics(newLyrics);
+                  }} className="p-3 bg-white/5 border border-white/5 rounded-xl text-[10px] font-bold hover:bg-purple-600/20 hover:border-purple-600/30 transition-all text-gray-300">{r}</button>
+                ))}
+              </div>
+              {rhymesLoading && <div className="text-center py-4 animate-pulse text-[10px] text-purple-400 font-bold uppercase">Scanning...</div>}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* AR OVERLAY */}
+      {showAR && (
+        <div className="fixed inset-0 z-[100] bg-black">
+          <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover opacity-60 grayscale" />
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/40 to-black/80 flex flex-col items-center justify-center p-20 pointer-events-none">
+             <div className="max-w-4xl w-full text-center text-white font-black text-4xl leading-relaxed tracking-tight font-mono uppercase">
+               {lyrics.split('\n').map((line, i) => (
+                 <div key={i} className="mb-4 opacity-80">{line}</div>
+               ))}
+             </div>
+          </div>
+          <button onClick={() => setShowAR(false)} className="absolute top-10 right-10 w-14 h-14 bg-white/10 hover:bg-red-500/50 rounded-full flex items-center justify-center transition-all">
+            <span className="material-icons-round text-white">close</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };
