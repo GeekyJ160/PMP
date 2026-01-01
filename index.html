@@ -7,7 +7,7 @@
   <title>PMP - Pen Melody Pad Ultimate</title>
   <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio"></script>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;900&family=Inter:wght@400;600;700&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round&display=block" rel="stylesheet">
   <style>
     body {
       background: #0F0F23;
@@ -16,6 +16,26 @@
       margin: 0;
       overflow-x: hidden;
     }
+    
+    /* Strict Icon Rendering Fix */
+    .material-icons-round {
+      font-family: 'Material Icons Round' !important;
+      font-weight: normal;
+      font-style: normal;
+      font-size: 24px;
+      line-height: 1;
+      letter-spacing: normal;
+      text-transform: none;
+      display: inline-block;
+      white-space: nowrap;
+      word-wrap: normal;
+      direction: ltr;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: 'liga';
+    }
+
     .metallic-text {
       background: linear-gradient(135deg, #E5E5E5 0%, #A78BFA 50%, #7C3AED 100%);
       -webkit-background-clip: text;
@@ -23,15 +43,16 @@
       background-clip: text;
     }
     .glass {
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(255, 255, 255, 0.03);
       backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
     .glass-dark {
-      background: rgba(15, 15, 35, 0.8);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(124, 58, 237, 0.3);
+      background: rgba(10, 10, 25, 0.85);
+      backdrop-filter: blur(25px);
+      border: 1px solid rgba(124, 58, 237, 0.2);
     }
+    
     ::-webkit-scrollbar {
       width: 6px;
     }
@@ -43,7 +64,6 @@
       border-radius: 10px;
     }
 
-    /* Target Word Pulse Highlight */
     @keyframes target-pulse {
       0% { box-shadow: 0 0 5px rgba(168, 85, 247, 0.4); border-bottom-color: rgba(168, 85, 247, 0.4); }
       50% { box-shadow: 0 0 20px rgba(168, 85, 247, 0.8); border-bottom-color: rgba(168, 85, 247, 1); }
@@ -58,19 +78,18 @@
       color: transparent !important;
     }
 
-    /* Ensure mirror and textarea have identical metrics */
     .editor-metrics {
       font-family: inherit;
       line-height: 1.6;
       white-space: pre-wrap;
       word-wrap: break-word;
-      padding: 3rem !important; /* matches p-12 */
-      font-size: 1.875rem !important; /* matches text-3xl */
+      padding: 3rem !important;
+      font-size: 1.875rem !important;
     }
 
     @media (max-width: 768px) {
       .editor-metrics {
-        font-size: 1.5rem !important; /* matches text-2xl */
+        font-size: 1.5rem !important;
       }
     }
   </style>
