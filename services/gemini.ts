@@ -11,34 +11,47 @@ export const getLyricSuggestions = async (
   artistMode?: boolean
 ): Promise<LyricSuggestion[]> => {
   const ai = getAI();
-  const bpm = instrumental?.bpm;
-  const key = instrumental?.key;
-  const energy = instrumental?.energy;
-  const vibes = instrumental?.vibe?.join(', ');
+  const bpm = instrumental?.bpm || 90;
+  const key = instrumental?.key || "Unknown";
+  const energy = instrumental?.energy || 50;
+  const vibes = instrumental?.vibe?.join(', ') || "neutral";
 
   const persona = artistMode 
-    ? "Act as an elite introspective R&B/Rap superstar like Drake. Use clever wordplay, emotional transparency, and references to city life. Prioritize melodic rap cadences."
-    : `Act as a world-class ${genre} songwriter.`;
+    ? "You are an elite, multi-platinum ghostwriter. Your style is sophisticated, using complex internal rhymes, double entendres, and perfect rhythmic 'pocket' placement."
+    : `You are a professional ${genre} songwriter known for creating commercially successful records.`;
 
-  const musicContext = `
-    Musical Blueprint:
-    - Tempo: ${bpm || '90'} BPM
-    - Key: ${key || 'Unknown'}
-    - Energy Level: ${energy || 'Medium'}
-    - Vibes: ${vibes || 'Standard'}
-  `;
+  const musicContext = instrumental ? `
+    TRACK CALIBRATION DATA:
+    - Tempo: ${bpm} BPM
+    - Scale: ${key}
+    - Energy Level: ${energy}/100
+    - Sonic Vibes: ${vibes}
+    
+    INSTRUCTION: Every bar must be rhythmically compatible with a 4/4 signature at ${bpm} BPM.
+    The emotional tone must resonate with the "${vibes}" atmosphere and the "${key}" musical scale.
+    Match the vocabulary and intensity to the energy level of ${energy}.
+  ` : `- Base Tempo: 90 BPM (Standard 4/4)`;
 
   const prompt = `${persona}
   ${musicContext}
-  Based on this lyrical context: "${context}", generate 5 unique suggestions.
-  Suggestions MUST match the rhythmic pocket of ${bpm || 90} BPM and the mood of the vibes: ${vibes || 'general'}.
-  Include varied types: rhymes, flow completions, metaphors, or punchlines.`;
+  
+  CURRENT WORK-IN-PROGRESS: "${context}"
+  
+  TASK: Provide 5 high-impact lyrical suggestions.
+  For each suggestion, provide:
+  - text: The lyrics/bars.
+  - type: One of ['rhyme', 'flow', 'metaphor', 'punchline', 'hook'].
+  - score: A "Rhythmic Sync" score (0-100) specifically calculated based on syllable count vs ${bpm} BPM.
+  - rating: Creative quality rating (1-5).
+  
+  Format your response as a JSON array.`;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3-pro-preview",
       contents: { parts: [{ text: prompt }] },
       config: {
+        thinkingConfig: { thinkingBudget: 4000 },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -72,28 +85,20 @@ export const getRhymeSuggestions = async (
   const ai = getAI();
   if (!word || word.length < 2) return [];
   
-  const tempoContext = bpm ? `${bpm} BPM` : "an unknown tempo";
-  
   const prompt = `
-    System: You are a legendary ${genre} songwriter and vocal arranger. 
-    Task: Generate high-tier rhyme suggestions for the word: "${word}".
+    System: Professional Songwriting Lexicon.
+    Context: Writing for ${genre} at ${bpm || 'unknown'} BPM.
+    Target Word: "${word}"
+    Lyric Segment: "${contextSnippet}"
     
-    Contextual Brief:
-    - Current Verse Snippet: "${contextSnippet}"
-    - Musical Tempo: ${tempoContext}
-    - Style Guide: ${genre === Genre.RAP ? 'Prioritize internal rhymes, multi-syllabic schemes, and slant rhymes.' : 'Prioritize clean, melodic end-rhymes and emotional resonance.'}
-    
-    Requirements:
-    1. Suggestions must maintain the rhythmic "pocket" of ${tempoContext}.
-    2. Words must be semantically coherent with the surrounding lyrical context.
-    3. Provide a mix of perfect rhymes and stylistic slant rhymes appropriate for ${genre}.
-    
-    Return exactly 16 suggestions as a JSON array of strings.
+    Task: Find 16 high-quality rhymes or slant-rhymes. 
+    Ensure they fit the phonetic aesthetic of the genre.
+    Return as a JSON array of strings.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
+      model: "gemini-3-flash-preview",
       contents: { parts: [{ text: prompt }] },
       config: {
         responseMimeType: "application/json",
@@ -110,22 +115,27 @@ export const getRhymeSuggestions = async (
 export const analyzeInstrumental = async (base64Audio: string, mimeType: string): Promise<any> => {
   const ai = getAI();
   const prompt = `
-    SYSTEM: You are an expert music producer and waveform analyst.
-    TASK: Analyze the provided audio file and extract precise musical metadata.
+    SYSTEM: You are a professional Audio Analyst.
+    TASK: Perform a detailed musical analysis of this audio clip.
     
     REQUIRED DATA:
-    1. BPM: The precise beats per minute (Number).
-    2. Key: The musical key and scale, e.g., 'A Minor' (String).
-    3. Energy: A score from 1-100 based on transient density and spectral intensity (Number).
-    4. Vibe: Exactly 4 descriptive tags, e.g., ['Spacey', 'Aggressive', 'Melancholic', 'Club'] (Array of Strings).
+    1. bpm: Estimated Beats Per Minute (Integer).
+    2. key: The musical key and scale (e.g., 'A Minor').
+    3. energy: A scale of 1-100 representing dynamic intensity.
+    4. vibe: Exactly 4 descriptive keywords characterizing the mood.
     
-    Format: Return ONLY a JSON object.
+    Output as JSON.
   `;
 
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-native-audio-preview-09-2025",
-      contents: [{ parts: [{ inlineData: { mimeType, data: base64Audio } }, { text: prompt }] }],
+      contents: [{ 
+        parts: [
+          { inlineData: { mimeType, data: base64Audio } }, 
+          { text: prompt }
+        ] 
+      }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -142,7 +152,7 @@ export const analyzeInstrumental = async (base64Audio: string, mimeType: string)
     });
     return response.text ? JSON.parse(response.text) : null;
   } catch (err) {
-    console.error("Analysis Failure:", err);
+    console.error("Analysis Error:", err);
     return null;
   }
 };

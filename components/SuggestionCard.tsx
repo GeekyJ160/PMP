@@ -35,7 +35,10 @@ const SuggestionCard: React.FC<Props> = ({ suggestion, onInsert, delay }) => {
           <span className="material-icons-round text-xs">{typeIcons[suggestion.type]}</span>
           {suggestion.type}
         </span>
-        <span className="text-[10px] text-gray-500 font-bold">{suggestion.score}% MATCH</span>
+        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-white/5 border border-white/5 rounded-full">
+           <span className="material-icons-round text-[10px] text-green-400">speed</span>
+           <span className="text-[9px] text-gray-400 font-black uppercase tracking-widest">{suggestion.score}% SYNC</span>
+        </div>
       </div>
       
       <p className="text-gray-200 text-sm leading-relaxed mb-4 group-hover:text-white transition-colors italic">
