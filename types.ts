@@ -18,9 +18,9 @@ export interface LyricSuggestion {
 export interface InstrumentalData {
   url: string;
   name: string;
-  bpm: number | null;
-  key: string | null;
-  energy: number | null;
+  bpm: number;
+  key: string;
+  energy: number;
   vibe: string[];
   mimeType: string;
 }

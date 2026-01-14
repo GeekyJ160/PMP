@@ -17,34 +17,21 @@ export const getLyricSuggestions = async (
   const vibes = instrumental?.vibe?.join(', ') || "neutral";
 
   const persona = artistMode 
-    ? "You are an elite, multi-platinum ghostwriter. Your style is sophisticated, using complex internal rhymes, double entendres, and perfect rhythmic 'pocket' placement."
-    : `You are a professional ${genre} songwriter known for creating commercially successful records.`;
+    ? "You are an elite ghostwriter. Your style is sophisticated, using complex internal rhymes and perfect rhythmic pocket placement."
+    : `You are a professional ${genre} songwriter.`;
 
   const musicContext = instrumental ? `
-    TRACK CALIBRATION DATA:
+    TRACK DATA:
     - Tempo: ${bpm} BPM
     - Scale: ${key}
-    - Energy Level: ${energy}/100
-    - Sonic Vibes: ${vibes}
+    - Energy: ${energy}/100
+    - Mood: ${vibes}
     
-    INSTRUCTION: Every bar must be rhythmically compatible with a 4/4 signature at ${bpm} BPM.
-    The emotional tone must resonate with the "${vibes}" atmosphere and the "${key}" musical scale.
-    Match the vocabulary and intensity to the energy level of ${energy}.
-  ` : `- Base Tempo: 90 BPM (Standard 4/4)`;
+    INSTRUCTION: Every line must fit a 4/4 signature at ${bpm} BPM. 
+    Emotional tone must align with ${vibes} in ${key}.
+  ` : `- Base Tempo: 90 BPM (Standard)`;
 
-  const prompt = `${persona}
-  ${musicContext}
-  
-  CURRENT WORK-IN-PROGRESS: "${context}"
-  
-  TASK: Provide 5 high-impact lyrical suggestions.
-  For each suggestion, provide:
-  - text: The lyrics/bars.
-  - type: One of ['rhyme', 'flow', 'metaphor', 'punchline', 'hook'].
-  - score: A "Rhythmic Sync" score (0-100) specifically calculated based on syllable count vs ${bpm} BPM.
-  - rating: Creative quality rating (1-5).
-  
-  Format your response as a JSON array.`;
+  const prompt = `${persona}\n${musicContext}\nCURRENT DRAFT: "${context}"\nTASK: Generate 5 lyrical suggestions in JSON format.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -85,16 +72,7 @@ export const getRhymeSuggestions = async (
   const ai = getAI();
   if (!word || word.length < 2) return [];
   
-  const prompt = `
-    System: Professional Songwriting Lexicon.
-    Context: Writing for ${genre} at ${bpm || 'unknown'} BPM.
-    Target Word: "${word}"
-    Lyric Segment: "${contextSnippet}"
-    
-    Task: Find 16 high-quality rhymes or slant-rhymes. 
-    Ensure they fit the phonetic aesthetic of the genre.
-    Return as a JSON array of strings.
-  `;
+  const prompt = `Find 16 high-quality rhymes or slant-rhymes for "${word}" at ${bpm || 90} BPM for a ${genre} track. Return as JSON string array.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -114,22 +92,11 @@ export const getRhymeSuggestions = async (
 
 export const analyzeInstrumental = async (base64Audio: string, mimeType: string): Promise<any> => {
   const ai = getAI();
-  const prompt = `
-    SYSTEM: You are a professional Audio Analyst.
-    TASK: Perform a detailed musical analysis of this audio clip.
-    
-    REQUIRED DATA:
-    1. bpm: Estimated Beats Per Minute (Integer).
-    2. key: The musical key and scale (e.g., 'A Minor').
-    3. energy: A scale of 1-100 representing dynamic intensity.
-    4. vibe: Exactly 4 descriptive keywords characterizing the mood.
-    
-    Output as JSON.
-  `;
+  const prompt = `Analyze audio: bpm (int), key (string), energy (1-100), vibe (4 keywords). Format: JSON.`;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-native-audio-preview-09-2025",
+      model: "gemini-2.5-flash-native-audio-preview-12-2025",
       contents: [{ 
         parts: [
           { inlineData: { mimeType, data: base64Audio } }, 
