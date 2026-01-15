@@ -59,7 +59,9 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     const end = el.selectionEnd;
     const text = el.value;
 
+    // We only trigger rhyme lookups if something is selected or if cursor is inside a word
     if (start === end) {
+      // Find the word bounds around the cursor
       const beforeStr = text.substring(0, start);
       const afterStr = text.substring(start);
       
@@ -82,6 +84,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
       }
     } else {
       const selection = text.substring(start, end).trim();
+      // Only highlight if it's a single word (no spaces/newlines)
       if (selection && !selection.includes(' ') && !selection.includes('\n')) {
         setSelectedWord({ text: selection, start, end });
       } else {
@@ -190,7 +193,10 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   }, [selectedWord, activeTab, fetchRhymes]);
 
   const handleScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
-    if (scrollRef.current) scrollRef.current.scrollTop = e.currentTarget.scrollTop;
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = e.currentTarget.scrollTop;
+      scrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+    }
   };
 
   const togglePlayback = () => {
@@ -213,6 +219,23 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     }, 4000);
     return () => clearTimeout(timer);
   }, [lyrics, userState.autoSuggest, fetchSuggestions]);
+
+  // Helper to render the background highlight layer
+  const renderHighlights = () => {
+    if (!selectedWord) return lyrics;
+
+    const before = lyrics.substring(0, selectedWord.start);
+    const word = lyrics.substring(selectedWord.start, selectedWord.end);
+    const after = lyrics.substring(selectedWord.end);
+
+    return (
+      <>
+        {before}
+        <span className="target-highlight">{word}</span>
+        {after}
+      </>
+    );
+  };
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#0A0A1A] overflow-hidden">
@@ -299,7 +322,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
             </span>
           </div>
           <div className="flex gap-4">
-            <button onClick={onCreateNew} className="p-2.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition-all">
+            <button onClick={onCreateNew} className="p-2.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition-all" title="New Project">
               <span className="material-icons-round text-sm">add_circle</span>
             </button>
             {userState.instrumental && (
@@ -315,15 +338,13 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
         </header>
 
         <div className="flex-1 relative overflow-hidden">
+          {/* Synchronized Background Layer for Highlights */}
           <div 
             ref={scrollRef}
             className="absolute inset-0 p-12 text-3xl font-mono pointer-events-none editor-metrics whitespace-pre-wrap select-none overflow-hidden leading-[1.6] text-transparent"
             aria-hidden="true"
           >
-            {lyrics.split('').map((char, i) => {
-              const isHighlighted = selectedWord && i >= selectedWord.start && i < selectedWord.end;
-              return <span key={i} className={isHighlighted ? 'target-highlight' : ''}>{char}</span>;
-            })}
+            {renderHighlights()}
           </div>
 
           <textarea
@@ -333,6 +354,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
             onScroll={handleScroll}
             onChange={(e) => {
               setLyrics(e.target.value);
+              // Clear selection immediately on change to avoid ghost highlights
               if (selectedWord) setSelectedWord(null);
             }}
             placeholder="Lay your bars here..."
