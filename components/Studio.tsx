@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UserState, LyricSuggestion, InstrumentalData, AppScreen, Genre } from '../types';
+import { UserState, LyricSuggestion, InstrumentalData, AppScreen, Genre, SongProject } from '../types';
 import { getLyricSuggestions, getRhymeSuggestions, analyzeInstrumental } from '../services/gemini';
 import SuggestionCard from './SuggestionCard';
 import BeatVisualizer from './BeatVisualizer';
@@ -13,18 +13,21 @@ interface Props {
   setLyrics: (val: string) => void;
   onShowStats: () => void;
   onUpdateInstrumental: (data: InstrumentalData | null) => void;
+  onLoadProject: (project: SongProject) => void;
+  onCreateNew: () => void;
 }
 
-const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onShowStats, onUpdateInstrumental }) => {
+const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onShowStats, onUpdateInstrumental, onLoadProject, onCreateNew }) => {
   const [suggestions, setSuggestions] = useState<LyricSuggestion[]>([]);
   const [rhymes, setRhymes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [rhymesLoading, setRhymesLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'ai' | 'rhymes'>('ai');
+  const [activeTab, setActiveTab] = useState<'ai' | 'rhymes' | 'projects'>('ai');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [playbackActive, setPlaybackActive] = useState(false);
   const [volume, setVolume] = useState(0.8);
   const [selectedWord, setSelectedWord] = useState<{ text: string; start: number; end: number } | null>(null);
+  const [savedProjects, setSavedProjects] = useState<SongProject[]>([]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -37,6 +40,16 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
       audioRef.current.volume = volume;
     }
   }, [volume]);
+
+  // Load projects list when switching to projects tab
+  useEffect(() => {
+    if (activeTab === 'projects') {
+      const projectsRaw = localStorage.getItem('pmp_projects');
+      if (projectsRaw) {
+        setSavedProjects(JSON.parse(projectsRaw));
+      }
+    }
+  }, [activeTab]);
 
   const handleSelection = () => {
     const el = textareaRef.current;
@@ -102,7 +115,6 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     if (!file) return;
 
     const url = URL.createObjectURL(file);
-    // Be flexible with the reported mimeType, but fallback to mpeg for common mp3 files
     const mimeType = file.type || 'audio/mpeg';
 
     onUpdateInstrumental({
@@ -144,7 +156,6 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
       }
     } catch (err) {
       console.error("Audio processing failed:", err);
-      // Fallback update so the user can still use the beat even if AI analysis fails
       onUpdateInstrumental({ url, name: file.name, bpm: 90, key: 'Detected', energy: 50, vibe: ['Unknown'], mimeType });
     } finally {
       setIsAnalyzing(false);
@@ -269,9 +280,14 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
           </div>
         )}
 
-        <button onClick={onShowStats} className="mt-auto flex items-center gap-3 p-4 rounded-2xl border border-white/5 text-xs font-black text-gray-400 hover:bg-white/5 transition-all uppercase tracking-widest">
-          <span className="material-icons-round text-lg text-purple-500">insights</span> Logic Board
-        </button>
+        <div className="mt-auto space-y-2">
+          <button onClick={() => setActiveTab('projects')} className="w-full flex items-center gap-3 p-4 rounded-2xl border border-white/5 text-xs font-black text-gray-400 hover:bg-white/5 transition-all uppercase tracking-widest">
+            <span className="material-icons-round text-lg text-blue-500">folder</span> Project Vault
+          </button>
+          <button onClick={onShowStats} className="w-full flex items-center gap-3 p-4 rounded-2xl border border-white/5 text-xs font-black text-gray-400 hover:bg-white/5 transition-all uppercase tracking-widest">
+            <span className="material-icons-round text-lg text-purple-500">insights</span> Logic Board
+          </button>
+        </div>
       </aside>
 
       <main className="flex-1 flex flex-col relative bg-[#0D0D1E]">
@@ -283,6 +299,9 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
             </span>
           </div>
           <div className="flex gap-4">
+            <button onClick={onCreateNew} className="p-2.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition-all">
+              <span className="material-icons-round text-sm">add_circle</span>
+            </button>
             {userState.instrumental && (
               <button 
                 onClick={togglePlayback} 
@@ -362,7 +381,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
         </div>
 
         <div className="p-6 overflow-y-auto custom-scroll flex-1">
-          {activeTab === 'ai' ? (
+          {activeTab === 'ai' && (
             <div className="space-y-4">
               {suggestions.map((s, i) => (
                 <SuggestionCard 
@@ -385,7 +404,9 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
                 </div>
               )}
             </div>
-          ) : (
+          )}
+
+          {activeTab === 'rhymes' && (
             <div className="space-y-6">
               <header className="space-y-2">
                 <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Rhyme Vault</p>
@@ -421,6 +442,56 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
                   <p className="text-[10px] font-black uppercase leading-relaxed">Highlight or tap any word<br/>to open the vault</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'projects' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+              <header className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Saved Drafts</p>
+                  <h3 className="text-xl font-bold text-white uppercase tracking-tighter">Archives</h3>
+                </div>
+                <button onClick={() => setActiveTab('ai')} className="text-gray-500 hover:text-white">
+                  <span className="material-icons-round">close</span>
+                </button>
+              </header>
+
+              <div className="space-y-3">
+                {savedProjects.length > 0 ? savedProjects.map((p) => (
+                  <button 
+                    key={p.id}
+                    onClick={() => {
+                      onLoadProject(p);
+                      setActiveTab('ai');
+                    }}
+                    className="w-full p-4 glass hover:bg-white/5 rounded-2xl border border-white/5 text-left transition-all group"
+                  >
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="text-[10px] font-black text-purple-400 uppercase tracking-widest">{p.userState.genre}</span>
+                      <span className="text-[8px] font-bold text-gray-600 uppercase">{new Date(p.updatedAt).toLocaleDateString()}</span>
+                    </div>
+                    <h4 className="text-sm font-bold text-gray-200 group-hover:text-white truncate mb-1">
+                      {p.lyrics.split('\n')[0].substring(0, 20) || 'Untitled Draft'}
+                    </h4>
+                    <p className="text-[9px] text-gray-500 line-clamp-1 italic">
+                      {p.lyrics.substring(0, 50)}...
+                    </p>
+                  </button>
+                )) : (
+                  <div className="py-20 text-center opacity-30">
+                    <span className="material-icons-round text-5xl mb-4">folder_open</span>
+                    <p className="text-[10px] font-black uppercase tracking-widest">No Saved Sessions</p>
+                  </div>
+                )}
+              </div>
+              
+              <button 
+                onClick={onCreateNew}
+                className="w-full py-4 rounded-2xl border border-dashed border-white/20 text-[10px] font-black text-gray-500 uppercase tracking-widest hover:border-purple-500/50 hover:text-purple-400 transition-all"
+              >
+                + New Manuscript
+              </button>
             </div>
           )}
         </div>

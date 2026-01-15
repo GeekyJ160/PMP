@@ -35,3 +35,11 @@ export interface UserState {
   artistModeEnabled: boolean;
   autoSuggest: boolean;
 }
+
+export interface SongProject {
+  id: string;
+  title: string;
+  lyrics: string;
+  userState: UserState;
+  updatedAt: number;
+}
