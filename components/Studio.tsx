@@ -28,20 +28,27 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   const [volume, setVolume] = useState(0.8);
   const [selectedWord, setSelectedWord] = useState<{ text: string; start: number; end: number } | null>(null);
   const [savedProjects, setSavedProjects] = useState<SongProject[]>([]);
+  
+  // Recording State
+  const [isRecordingPerformance, setIsRecordingPerformance] = useState(false);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Sync volume with element
+  // Audio Processing Refs
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
     }
   }, [volume]);
 
-  // Load projects list when switching to projects tab
   useEffect(() => {
     if (activeTab === 'projects') {
       const projectsRaw = localStorage.getItem('pmp_projects');
@@ -59,9 +66,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     const end = el.selectionEnd;
     const text = el.value;
 
-    // We only trigger rhyme lookups if something is selected or if cursor is inside a word
     if (start === end) {
-      // Find the word bounds around the cursor
       const beforeStr = text.substring(0, start);
       const afterStr = text.substring(start);
       
@@ -84,7 +89,6 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
       }
     } else {
       const selection = text.substring(start, end).trim();
-      // Only highlight if it's a single word (no spaces/newlines)
       if (selection && !selection.includes(' ') && !selection.includes('\n')) {
         setSelectedWord({ text: selection, start, end });
       } else {
@@ -118,15 +122,31 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     if (!file) return;
 
     const url = URL.createObjectURL(file);
-    const mimeType = file.type || 'audio/mpeg';
+    
+    // Robust MIME detection
+    let mimeType = file.type;
+    if (!mimeType) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      const mimeMap: Record<string, string> = {
+        'mp3': 'audio/mpeg',
+        'wav': 'audio/wav',
+        'm4a': 'audio/aac',
+        'aac': 'audio/aac',
+        'ogg': 'audio/ogg',
+        'flac': 'audio/flac',
+        'aif': 'audio/aiff',
+        'aiff': 'audio/aiff'
+      };
+      mimeType = mimeMap[ext || ''] || 'audio/mpeg';
+    }
 
     onUpdateInstrumental({
       url,
       name: file.name,
       bpm: 0,
-      key: 'Analyzing...',
+      key: 'Analyzing Spectrum...',
       energy: 50,
-      vibe: ['Processing'],
+      vibe: ['Initializing'],
       mimeType
     });
 
@@ -156,6 +176,8 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
           vibe: analysis.vibe || ['custom'],
           mimeType
         });
+      } else {
+        throw new Error("Analysis returned empty");
       }
     } catch (err) {
       console.error("Audio processing failed:", err);
@@ -213,6 +235,89 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     }
   };
 
+  // Recording Performance Logic
+  const startRecordingPerformance = async () => {
+    if (!userState.instrumental || !audioRef.current) return;
+
+    try {
+      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      const ctx = audioContextRef.current;
+      const dest = ctx.createMediaStreamDestination();
+      
+      // Instrumental Source
+      const instSource = ctx.createMediaElementSource(audioRef.current);
+      const instGain = ctx.createGain();
+      instGain.gain.value = volume;
+      instSource.connect(instGain);
+      instGain.connect(dest);
+      instGain.connect(ctx.destination); // Also play to speakers
+
+      // Microphone Source
+      const micSource = ctx.createMediaStreamSource(micStream);
+      const micGain = ctx.createGain();
+      micGain.gain.value = 1.0; // Voice priority
+      micSource.connect(micGain);
+      micGain.connect(dest);
+      
+      const mediaRecorder = new MediaRecorder(dest.stream);
+      mediaRecorderRef.current = mediaRecorder;
+      recordedChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        setRecordedAudioUrl(url);
+        
+        // Clean up mic stream
+        micStream.getTracks().forEach(track => track.stop());
+      };
+
+      setIsRecordingPerformance(true);
+      setPlaybackActive(true);
+      audioRef.current.currentTime = 0;
+      audioRef.current.play();
+      mediaRecorder.start();
+    } catch (err) {
+      console.error("Failed to start recording:", err);
+      alert("Microphone access is required to record your performance.");
+    }
+  };
+
+  const stopRecordingPerformance = () => {
+    if (mediaRecorderRef.current && isRecordingPerformance) {
+      mediaRecorderRef.current.stop();
+      setIsRecordingPerformance(false);
+      setPlaybackActive(false);
+      if (audioRef.current) audioRef.current.pause();
+    }
+  };
+
+  const downloadLyrics = () => {
+    const element = document.createElement("a");
+    const file = new Blob([lyrics], {type: 'text/plain'});
+    element.href = URL.createObjectURL(file);
+    element.download = `${userState.instrumental?.name || 'Untitled'}_Lyrics.txt`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
+  const downloadPerformance = () => {
+    if (!recordedAudioUrl) return;
+    const element = document.createElement("a");
+    element.href = recordedAudioUrl;
+    element.download = `${userState.instrumental?.name || 'Untitled'}_Performance.webm`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => { 
       if (userState.autoSuggest && lyrics.length > 10) fetchSuggestions(); 
@@ -220,14 +325,11 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     return () => clearTimeout(timer);
   }, [lyrics, userState.autoSuggest, fetchSuggestions]);
 
-  // Helper to render the background highlight layer
   const renderHighlights = () => {
     if (!selectedWord) return lyrics;
-
     const before = lyrics.substring(0, selectedWord.start);
     const word = lyrics.substring(selectedWord.start, selectedWord.end);
     const after = lyrics.substring(selectedWord.end);
-
     return (
       <>
         {before}
@@ -242,8 +344,11 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
       <audio 
         ref={audioRef} 
         src={userState.instrumental?.url} 
-        loop 
-        onEnded={() => setPlaybackActive(false)}
+        loop={!isRecordingPerformance}
+        onEnded={() => {
+          if (isRecordingPerformance) stopRecordingPerformance();
+          setPlaybackActive(false);
+        }}
       />
       <input 
         ref={fileInputRef} 
@@ -257,15 +362,18 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
         <h1 className="font-black text-xl tracking-tighter metallic-text font-['Orbitron']">PMP STUDIO</h1>
         
         <div className="space-y-4">
-          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Beat Lab</label>
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Beat Lab</label>
+            {isAnalyzing && <span className="w-2 h-2 rounded-full bg-purple-500 animate-ping"></span>}
+          </div>
           <div 
             onClick={() => !isAnalyzing && fileInputRef.current?.click()} 
-            className="cursor-pointer border-2 border-dashed border-white/10 p-6 rounded-[2.5rem] hover:bg-white/5 transition-all text-center group relative overflow-hidden"
+            className={`cursor-pointer border-2 border-dashed p-6 rounded-[2.5rem] transition-all text-center group relative overflow-hidden ${isAnalyzing ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/10 hover:bg-white/5'}`}
           >
             {isAnalyzing ? (
               <div className="py-4 flex flex-col items-center gap-2">
                 <span className="material-icons-round animate-spin text-purple-500 text-3xl">sync</span>
-                <p className="text-[9px] font-black uppercase text-purple-400">Scanning Spectrum...</p>
+                <p className="text-[9px] font-black uppercase text-purple-400 tracking-tighter">Harmonic Analysis...</p>
               </div>
             ) : userState.instrumental ? (
               <div>
@@ -286,20 +394,40 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
         </div>
 
         {userState.instrumental && (
-          <div className="space-y-3 bg-white/[0.03] p-4 rounded-2xl border border-white/5">
-            <div className="flex items-center justify-between text-[10px] font-black text-gray-500 uppercase tracking-widest">
-              <span>Output Volume</span>
-              <span className="text-purple-400">{Math.round(volume * 100)}%</span>
+          <div className="space-y-4">
+            <div className="space-y-3 bg-white/[0.03] p-4 rounded-2xl border border-white/5">
+              <div className="flex items-center justify-between text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                <span>Output Volume</span>
+                <span className="text-purple-400">{Math.round(volume * 100)}%</span>
+              </div>
+              <input 
+                type="range" 
+                min="0" 
+                max="1" 
+                step="0.01" 
+                value={volume} 
+                onChange={(e) => setVolume(parseFloat(e.target.value))}
+                className="w-full accent-purple-600 bg-white/10 h-1.5 rounded-full appearance-none cursor-pointer"
+              />
             </div>
-            <input 
-              type="range" 
-              min="0" 
-              max="1" 
-              step="0.01" 
-              value={volume} 
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
-              className="w-full accent-purple-600 bg-white/10 h-1.5 rounded-full appearance-none cursor-pointer"
-            />
+            
+            <div className="space-y-2">
+              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-2">Export Tools</p>
+              <button 
+                onClick={downloadLyrics}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/5 text-[10px] font-black text-gray-400 hover:bg-white/5 transition-all uppercase tracking-widest"
+              >
+                <span className="material-icons-round text-lg text-blue-400">description</span> Save Lyrics (.txt)
+              </button>
+              {recordedAudioUrl && (
+                <button 
+                  onClick={downloadPerformance}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-[10px] font-black text-green-400 hover:bg-green-500/20 transition-all uppercase tracking-widest animate-in fade-in zoom-in"
+                >
+                  <span className="material-icons-round text-lg">download</span> Export Audio
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -318,7 +446,12 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
           <div className="flex flex-col">
             <h2 className="text-xl font-black font-['Orbitron'] uppercase tracking-tight metallic-text">Notepad</h2>
             <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-              {playbackActive ? 'Streaming Live' : 'Notepad Mode'}
+              {isRecordingPerformance ? (
+                <span className="flex items-center gap-1.5 text-red-500 animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                  Recording Performance...
+                </span>
+              ) : playbackActive ? 'Streaming Live' : 'Notepad Mode'}
             </span>
           </div>
           <div className="flex gap-4">
@@ -326,19 +459,28 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
               <span className="material-icons-round text-sm">add_circle</span>
             </button>
             {userState.instrumental && (
-              <button 
-                onClick={togglePlayback} 
-                className={`flex items-center gap-2 px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all shadow-2xl ${playbackActive ? 'bg-red-500 text-white shadow-red-500/20' : 'bg-purple-600 text-white shadow-purple-500/40'}`}
-              >
-                <span className="material-icons-round text-sm">{playbackActive ? 'stop' : 'play_arrow'}</span> 
-                {playbackActive ? 'Cut Audio' : 'Play Beat'}
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={isRecordingPerformance ? stopRecordingPerformance : startRecordingPerformance}
+                  className={`flex items-center gap-2 px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all shadow-2xl ${isRecordingPerformance ? 'bg-red-600 text-white shadow-red-500/40 ring-2 ring-red-500/20' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                >
+                  <span className="material-icons-round text-sm">{isRecordingPerformance ? 'stop' : 'radio_button_checked'}</span>
+                  {isRecordingPerformance ? 'Stop Recording' : 'Record'}
+                </button>
+                <button 
+                  onClick={togglePlayback} 
+                  disabled={isRecordingPerformance}
+                  className={`flex items-center gap-2 px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all shadow-2xl ${playbackActive ? 'bg-red-500 text-white shadow-red-500/20' : 'bg-purple-600 text-white shadow-purple-500/40'} ${isRecordingPerformance ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <span className="material-icons-round text-sm">{playbackActive ? 'stop' : 'play_arrow'}</span> 
+                  {playbackActive ? 'Cut Audio' : 'Play Beat'}
+                </button>
+              </div>
             )}
           </div>
         </header>
 
         <div className="flex-1 relative overflow-hidden">
-          {/* Synchronized Background Layer for Highlights */}
           <div 
             ref={scrollRef}
             className="absolute inset-0 p-12 text-3xl font-mono pointer-events-none editor-metrics whitespace-pre-wrap select-none overflow-hidden leading-[1.6] text-transparent"
@@ -354,7 +496,6 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
             onScroll={handleScroll}
             onChange={(e) => {
               setLyrics(e.target.value);
-              // Clear selection immediately on change to avoid ghost highlights
               if (selectedWord) setSelectedWord(null);
             }}
             placeholder="Lay your bars here..."
@@ -370,9 +511,9 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
             {selectedWord && <span className="text-purple-400 animate-pulse">Scanning: "{selectedWord.text}"</span>}
           </div>
           <div className="flex items-center gap-3">
-            {playbackActive && (
+            {(playbackActive || isRecordingPerformance) && (
               <div className="flex gap-0.5">
-                {[...Array(4)].map((_, i) => <div key={i} className="w-0.5 h-2 bg-purple-500 animate-bounce" style={{ animationDelay: `${i*100}ms` }}></div>)}
+                {[...Array(4)].map((_, i) => <div key={i} className={`w-0.5 h-2 ${isRecordingPerformance ? 'bg-red-500' : 'bg-purple-500'} animate-bounce`} style={{ animationDelay: `${i*100}ms` }}></div>)}
               </div>
             )}
             <div className="flex items-center gap-2 text-green-500/60 font-bold">

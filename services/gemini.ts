@@ -141,26 +141,45 @@ export const getRhymeSuggestions = async (
 export const analyzeInstrumental = async (base64Audio: string, mimeType: string): Promise<any> => {
   const ai = getAI();
   
-  // Normalize MIME types for Gemini. Browsers often use audio/mp3, but audio/mpeg is the standard IANA type.
-  let normalizedMime = mimeType;
-  if (mimeType === 'audio/mp3') normalizedMime = 'audio/mpeg';
-  if (mimeType === 'audio/x-m4a' || mimeType === 'audio/m4a') normalizedMime = 'audio/aac';
+  // Comprehensive MIME type normalization for Gemini API compatibility
+  let normalizedMime = mimeType.toLowerCase();
+  
+  if (normalizedMime.includes('audio/mpeg') || normalizedMime.includes('audio/mp3')) {
+    normalizedMime = 'audio/mpeg';
+  } else if (normalizedMime.includes('audio/wav') || normalizedMime.includes('audio/x-wav')) {
+    normalizedMime = 'audio/wav';
+  } else if (normalizedMime.includes('audio/aac') || normalizedMime.includes('audio/x-aac')) {
+    normalizedMime = 'audio/aac';
+  } else if (normalizedMime.includes('audio/m4a') || normalizedMime.includes('audio/mp4') || normalizedMime.includes('audio/x-m4a')) {
+    // M4A files are technically MP4 containers, but Gemini often prefers audio/aac or audio/mp4
+    normalizedMime = 'audio/aac'; 
+  } else if (normalizedMime.includes('audio/aiff') || normalizedMime.includes('audio/x-aiff')) {
+    normalizedMime = 'audio/aiff';
+  } else if (normalizedMime.includes('audio/ogg')) {
+    normalizedMime = 'audio/ogg';
+  } else if (normalizedMime.includes('audio/flac')) {
+    normalizedMime = 'audio/flac';
+  } else {
+    // Default fallback if unknown, usually audio/mpeg is a safe bet for generic compressed audio
+    normalizedMime = 'audio/mpeg';
+  }
   
   const prompt = `
-    Act as a senior audio engineer and musicologist. 
-    Listen to this audio clip and accurately determine:
-    1. BPM (Beats Per Minute) as an integer.
-    2. Musical Key (e.g., 'C minor', 'G# major').
-    3. Energy Level (1-100).
-    4. 4 descriptive vibe keywords.
+    ROLE: You are an elite Musicologist and Digital Signal Processing (DSP) expert. 
+    TASK: Perform a deep structural analysis of the provided audio file.
     
-    Be precise. If it is an upbeat track, the BPM should reflect the actual tempo, not a default.
-    Return strictly as JSON.
+    FOCUS AREAS:
+    1. BPM: Identify the tempo by analyzing the transient peak intervals (the "heartbeat" of the track). If double-time or half-time is possible, provide the most likely intended BPM.
+    2. KEY: Determine the musical key (tonic and scale) by analyzing harmonic density and recurring melodic intervals. Use standard notation (e.g., "A minor", "F# major").
+    3. ENERGY: Quantify the rhythmic intensity and spectral brightness on a scale of 1-100.
+    4. VIBE: Identify 4 keywords that describe the soundscape (e.g., "Gritty", "Ethereal", "Aggressive", "Soulful").
+    
+    IMPORTANT: Provide only the most probable results. If unsure about BPM, default to the detected primary beat frequency. Be precise.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash-native-audio-preview-12-2025",
       contents: [{ 
         parts: [
           { inlineData: { mimeType: normalizedMime, data: base64Audio } }, 
@@ -172,10 +191,10 @@ export const analyzeInstrumental = async (base64Audio: string, mimeType: string)
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            bpm: { type: Type.INTEGER },
-            key: { type: Type.STRING },
-            energy: { type: Type.INTEGER },
-            vibe: { type: Type.ARRAY, items: { type: Type.STRING } }
+            bpm: { type: Type.INTEGER, description: "Beats per minute, must be between 40 and 220." },
+            key: { type: Type.STRING, description: "Musical key, e.g. 'C minor' or 'G major'." },
+            energy: { type: Type.INTEGER, description: "Intensity score from 1-100." },
+            vibe: { type: Type.ARRAY, items: { type: Type.STRING }, description: "4 descriptive vibe words." }
           },
           required: ["bpm", "key", "energy", "vibe"]
         }
