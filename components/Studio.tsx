@@ -32,14 +32,17 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   // Recording State
   const [isRecordingPerformance, setIsRecordingPerformance] = useState(false);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+  const [recordingOffset, setRecordingOffset] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const performanceAudioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Audio Processing Refs
   const audioContextRef = useRef<AudioContext | null>(null);
+  const instSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
@@ -225,15 +228,52 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     if (!audioRef.current) return;
     if (playbackActive) {
       audioRef.current.pause();
+      if (performanceAudioRef.current) performanceAudioRef.current.pause();
       setPlaybackActive(false);
     } else {
       audioRef.current.play().then(() => {
         setPlaybackActive(true);
+        if (performanceAudioRef.current && recordedAudioUrl) {
+          const targetTime = audioRef.current!.currentTime - recordingOffset;
+          if (targetTime >= 0 && targetTime < performanceAudioRef.current.duration) {
+            performanceAudioRef.current.currentTime = targetTime;
+            performanceAudioRef.current.play().catch(e => console.warn("Performance playback failed", e));
+          }
+        }
       }).catch(err => {
         console.error("Audio playback failed.", err);
       });
     }
   };
+
+  // Sync performance to instrumental
+  useEffect(() => {
+    const inst = audioRef.current;
+    const perf = performanceAudioRef.current;
+    if (!inst || !perf || !recordedAudioUrl || !playbackActive) return;
+
+    const handleTimeUpdate = () => {
+      const targetTime = inst.currentTime - recordingOffset;
+      
+      if (targetTime < 0) {
+        if (!perf.paused) perf.pause();
+        perf.currentTime = 0;
+      } else if (targetTime > perf.duration) {
+        if (!perf.paused) perf.pause();
+      } else {
+        if (playbackActive && perf.paused && !isRecordingPerformance) {
+          perf.play().catch(() => {});
+        }
+        // Sync if drift is > 150ms
+        if (Math.abs(perf.currentTime - targetTime) > 0.15) {
+          perf.currentTime = targetTime;
+        }
+      }
+    };
+
+    inst.addEventListener('timeupdate', handleTimeUpdate);
+    return () => inst.removeEventListener('timeupdate', handleTimeUpdate);
+  }, [playbackActive, recordedAudioUrl, recordingOffset, isRecordingPerformance]);
 
   // Recording Performance Logic
   const startRecordingPerformance = async () => {
@@ -241,23 +281,37 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
 
     try {
       const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
       
       const ctx = audioContextRef.current;
+      
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+
+      // Setup Routing
       const dest = ctx.createMediaStreamDestination();
       
-      // Instrumental Source
-      const instSource = ctx.createMediaElementSource(audioRef.current);
+      // Instrumental Source (only create once)
+      if (!instSourceRef.current) {
+        instSourceRef.current = ctx.createMediaElementSource(audioRef.current);
+      }
+      
       const instGain = ctx.createGain();
       instGain.gain.value = volume;
-      instSource.connect(instGain);
-      instGain.connect(dest);
-      instGain.connect(ctx.destination); // Also play to speakers
+      instSourceRef.current.disconnect();
+      instSourceRef.current.connect(instGain);
+      instGain.connect(ctx.destination); // Hear it
+      // We DON'T connect inst to dest anymore, so we record ONLY the mic for better sync/mixing later
+      // This allows us to "align" it during playback.
 
       // Microphone Source
       const micSource = ctx.createMediaStreamSource(micStream);
       const micGain = ctx.createGain();
-      micGain.gain.value = 1.0; // Voice priority
+      micGain.gain.value = 1.0;
       micSource.connect(micGain);
       micGain.connect(dest);
       
@@ -273,16 +327,35 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
         const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
         const url = URL.createObjectURL(blob);
         setRecordedAudioUrl(url);
-        
-        // Clean up mic stream
         micStream.getTracks().forEach(track => track.stop());
       };
 
+      // Snap to Beat Logic
+      const bpm = userState.instrumental.bpm || 90;
+      const beatDuration = 60 / bpm;
+      const currentTime = audioRef.current.currentTime;
+      
+      // Find next beat or start immediately if close enough
+      const nextBeat = Math.ceil(currentTime / beatDuration) * beatDuration;
+      const delay = (nextBeat - currentTime) * 1000;
+
       setIsRecordingPerformance(true);
       setPlaybackActive(true);
-      audioRef.current.currentTime = 0;
+      
+      if (delay > 50) {
+        // Wait for next beat to start recording for perfect alignment
+        setTimeout(() => {
+          if (mediaRecorder.state === 'inactive') {
+            mediaRecorder.start();
+            setRecordingOffset(nextBeat);
+          }
+        }, delay);
+      } else {
+        mediaRecorder.start();
+        setRecordingOffset(currentTime);
+      }
+
       audioRef.current.play();
-      mediaRecorder.start();
     } catch (err) {
       console.error("Failed to start recording:", err);
       alert("Microphone access is required to record your performance.");
@@ -348,6 +421,13 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
         onEnded={() => {
           if (isRecordingPerformance) stopRecordingPerformance();
           setPlaybackActive(false);
+        }}
+      />
+      <audio 
+        ref={performanceAudioRef} 
+        src={recordedAudioUrl || undefined} 
+        onEnded={() => {
+          // Performance ended, but instrumental might still be playing
         }}
       />
       <input 
@@ -420,12 +500,23 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
                 <span className="material-icons-round text-lg text-blue-400">description</span> Save Lyrics (.txt)
               </button>
               {recordedAudioUrl && (
-                <button 
-                  onClick={downloadPerformance}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-[10px] font-black text-green-400 hover:bg-green-500/20 transition-all uppercase tracking-widest animate-in fade-in zoom-in"
-                >
-                  <span className="material-icons-round text-lg">download</span> Export Audio
-                </button>
+                <div className="space-y-2">
+                  <button 
+                    onClick={downloadPerformance}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-[10px] font-black text-green-400 hover:bg-green-500/20 transition-all uppercase tracking-widest animate-in fade-in zoom-in"
+                  >
+                    <span className="material-icons-round text-lg">download</span> Export Vocal Stem
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setRecordedAudioUrl(null);
+                      setRecordingOffset(0);
+                    }}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-red-500/20 text-[10px] font-black text-red-400 hover:bg-red-500/10 transition-all uppercase tracking-widest"
+                  >
+                    <span className="material-icons-round text-lg">delete_sweep</span> Clear Take
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -541,6 +632,21 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
           >
             <span className="material-icons-round text-xs">token</span> Vault
           </button>
+        </div>
+
+        <div className="px-6 pt-4 pb-2">
+          <div className="flex items-center gap-2 px-3 py-2 bg-white/5 rounded-lg border border-white/10">
+            <span className="material-icons-round text-purple-400 text-sm">psychology</span>
+            <div className="flex flex-col">
+              <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Active Persona</span>
+              <span className="text-[10px] font-bold text-gray-300">
+                {userState.artistModeEnabled ? 'Ghostwriter' : 
+                 userState.genre === Genre.RAP ? 'Battle Rapper' : 
+                 userState.genre === Genre.POP ? 'Hitmaker' : 
+                 userState.genre === Genre.RNB ? 'Soulful Balladeer' : 'Versatile Writer'}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="p-6 overflow-y-auto custom-scroll flex-1">

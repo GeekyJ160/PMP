@@ -18,20 +18,20 @@ export const getLyricSuggestions = async (
 
   let persona = "";
   if (artistMode) {
-    persona = "You are a multi-platinum, award-winning ghostwriter. Your writing is complex, utilizing sophisticated multi-syllabic rhymes, intricate internal rhyme schemes, and deep thematic cohesion.";
+    persona = "You are a multi-platinum, award-winning ghostwriter. Your writing is complex, utilizing sophisticated multi-syllabic rhymes, intricate internal rhyme schemes, and deep thematic cohesion. You write lyrics that are critically acclaimed and commercially successful.";
   } else {
     switch (genre) {
       case Genre.RAP:
-        persona = "You are a veteran battle rapper and lyricist. Focus on heavy punchlines, wordplay, and rhythmic variety.";
+        persona = "You are a legendary battle rapper and lyrical architect. Your style is aggressive, witty, and highly technical. Focus on heavy punchlines, double entendres, complex multi-syllabic rhyme schemes, and relentless rhythmic variety. Your lyrics should hit hard and demand attention.";
         break;
       case Genre.POP:
-        persona = "You are a professional hit-making pop songwriter. Focus on catchy imagery and relatable emotional hooks.";
+        persona = "You are a chart-topping pop hitmaker. Your style is infectious, relatable, and melodically driven. Focus on catchy imagery, universal emotional hooks, simple but effective rhyme schemes, and memorable choruses that get stuck in the listener's head. Your lyrics should be anthemic and radio-ready.";
         break;
       case Genre.RNB:
-        persona = "You are a soulful R&B songwriter. Focus on emotional vulnerability and smooth cadences.";
+        persona = "You are a soulful R&B balladeer and vocal storyteller. Your style is intimate, passionate, and emotionally raw. Focus on vulnerability, sensual imagery, smooth cadences, and poetic expressions of love, heartbreak, and desire. Your lyrics should feel deeply personal and evocative.";
         break;
       default:
-        persona = "You are a professional versatile songwriter.";
+        persona = "You are a highly versatile, professional songwriter capable of adapting to any style. Focus on strong structure, clear messaging, and engaging phrasing.";
     }
   }
 
@@ -49,7 +49,15 @@ export const getLyricSuggestions = async (
     
     CURRENT LYRICAL CONTEXT: "${context}"
     
-    TASK: Provide 5 high-impact lyrical suggestions that logically follow the context.
+    TASK: Provide 5 highly diverse, creative, and high-impact lyrical suggestions that logically follow or creatively contrast with the context. 
+    Ensure variety in the types of suggestions. Include:
+    1. A clever punchline or intricate wordplay.
+    2. A vivid metaphor or strong sensory imagery.
+    3. A rhythmic flow switch or unexpected cadence change.
+    4. A thematic continuation or emotional escalation.
+    5. A catchy hook element or memorable phrase.
+    
+    Make the suggestions unique, avoiding clichés and predictable rhymes. Push the boundaries of the genre.
     Output strictly in JSON format.
   `;
 
@@ -58,6 +66,8 @@ export const getLyricSuggestions = async (
       model: "gemini-3-pro-preview",
       contents: { parts: [{ text: prompt }] },
       config: {
+        temperature: 0.9,
+        topP: 0.95,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -111,9 +121,15 @@ export const getRhymeSuggestions = async (
     ${genreInstructions[genre]}
 
     TASK:
-    Generate a list of 16 high-quality rhyme suggestions for the target word. 
+    Generate a list of 16 high-quality, highly creative rhyme suggestions for the target word. 
     Ensure the rhymes feel natural within the provided context snippet. 
-    Include a mix of perfect rhymes, slant rhymes, and multi-syllabic combinations where appropriate.
+    Include a diverse mix:
+    - Perfect rhymes
+    - Slant rhymes / Assonance
+    - Multi-syllabic combinations (e.g., matching the vowel sounds of multiple syllables)
+    - Unexpected or clever word choices that fit the genre.
+    
+    Avoid basic, predictable rhymes (like cat/hat) unless absolutely necessary for the context.
 
     RESPONSE FORMAT: 
     Strict JSON array of strings.
@@ -124,6 +140,7 @@ export const getRhymeSuggestions = async (
       model: "gemini-3-flash-latest",
       contents: { parts: [{ text: prompt }] },
       config: {
+        temperature: 0.85,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
