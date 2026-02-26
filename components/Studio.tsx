@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { UserState, LyricSuggestion, InstrumentalData, AppScreen, Genre, SongProject } from '../types';
 import { getLyricSuggestions, getRhymeSuggestions, analyzeInstrumental } from '../services/gemini';
 import SuggestionCard from './SuggestionCard';
@@ -15,9 +16,10 @@ interface Props {
   onUpdateInstrumental: (data: InstrumentalData | null) => void;
   onLoadProject: (project: SongProject) => void;
   onCreateNew: () => void;
+  currentProjectId: string | null;
 }
 
-const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onShowStats, onUpdateInstrumental, onLoadProject, onCreateNew }) => {
+const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onShowStats, onUpdateInstrumental, onLoadProject, onCreateNew, currentProjectId }) => {
   const [suggestions, setSuggestions] = useState<LyricSuggestion[]>([]);
   const [rhymes, setRhymes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -28,6 +30,9 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   const [volume, setVolume] = useState(0.8);
   const [selectedWord, setSelectedWord] = useState<{ text: string; start: number; end: number } | null>(null);
   const [savedProjects, setSavedProjects] = useState<SongProject[]>([]);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [collaborators, setCollaborators] = useState<string[]>([]);
+  const [isRemoteUpdate, setIsRemoteUpdate] = useState(false);
   
   // Recording State
   const [isRecordingPerformance, setIsRecordingPerformance] = useState(false);
@@ -60,6 +65,56 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
       }
     }
   }, [activeTab]);
+
+  // WebSocket Connection
+  useEffect(() => {
+    if (!currentProjectId) return;
+
+    const newSocket = io();
+    setSocket(newSocket);
+
+    newSocket.emit('join-project', currentProjectId);
+
+    newSocket.on('sync-state', (state) => {
+      setIsRemoteUpdate(true);
+      setLyrics(state.lyrics);
+      if (state.playback.active && audioRef.current) {
+        audioRef.current.currentTime = state.playback.time;
+        audioRef.current.play();
+        setPlaybackActive(true);
+      }
+    });
+
+    newSocket.on('lyrics-updated', (newLyrics) => {
+      setIsRemoteUpdate(true);
+      setLyrics(newLyrics);
+    });
+
+    newSocket.on('playback-updated', ({ active, time }) => {
+      if (audioRef.current) {
+        if (active) {
+          audioRef.current.currentTime = time;
+          audioRef.current.play();
+          setPlaybackActive(true);
+        } else {
+          audioRef.current.pause();
+          setPlaybackActive(false);
+        }
+      }
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [currentProjectId]);
+
+  // Emit lyric changes
+  useEffect(() => {
+    if (socket && currentProjectId && !isRemoteUpdate) {
+      socket.emit('update-lyrics', { projectId: currentProjectId, lyrics });
+    }
+    setIsRemoteUpdate(false);
+  }, [lyrics, socket, currentProjectId]);
 
   const handleSelection = () => {
     const el = textareaRef.current;
@@ -226,6 +281,9 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
 
   const togglePlayback = () => {
     if (!audioRef.current) return;
+    const newActive = !playbackActive;
+    const currentTime = audioRef.current.currentTime;
+
     if (playbackActive) {
       audioRef.current.pause();
       if (performanceAudioRef.current) performanceAudioRef.current.pause();
@@ -243,6 +301,10 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
       }).catch(err => {
         console.error("Audio playback failed.", err);
       });
+    }
+
+    if (socket && currentProjectId) {
+      socket.emit('update-playback', { projectId: currentProjectId, active: newActive, time: currentTime });
     }
   };
 
@@ -634,7 +696,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
           </button>
         </div>
 
-        <div className="px-6 pt-4 pb-2">
+        <div className="px-6 pt-4 pb-2 space-y-2">
           <div className="flex items-center gap-2 px-3 py-2 bg-white/5 rounded-lg border border-white/10">
             <span className="material-icons-round text-purple-400 text-sm">psychology</span>
             <div className="flex flex-col">
@@ -643,10 +705,37 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
                 {userState.artistModeEnabled ? 'Ghostwriter' : 
                  userState.genre === Genre.RAP ? 'Battle Rapper' : 
                  userState.genre === Genre.POP ? 'Hitmaker' : 
-                 userState.genre === Genre.RNB ? 'Soulful Balladeer' : 'Versatile Writer'}
+                 userState.genre === Genre.RNB ? 'Soulful Balladeer' : 
+                 userState.genre === Genre.ROCK ? 'Rock Icon' :
+                 userState.genre === Genre.COUNTRY ? 'Country Storyteller' :
+                 userState.genre === Genre.METAL ? 'Metal Lyricist' :
+                 userState.genre === Genre.JAZZ ? 'Jazz Poet' :
+                 userState.genre === Genre.ELECTRONIC ? 'Electronic Producer' : 'Versatile Writer'}
               </span>
             </div>
           </div>
+          
+          <div className="flex items-center gap-2 px-3 py-2 bg-green-500/5 rounded-lg border border-green-500/10">
+            <span className="material-icons-round text-green-400 text-sm">group</span>
+            <div className="flex flex-col">
+              <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Collaboration</span>
+              <span className="text-[10px] font-bold text-green-300">
+                {socket?.connected ? 'Live Sync Active' : 'Connecting...'}
+              </span>
+            </div>
+          </div>
+          
+          <button 
+            onClick={() => {
+              const url = window.location.href;
+              navigator.clipboard.writeText(url);
+              alert('Project link copied to clipboard!');
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 bg-blue-500/5 rounded-lg border border-blue-500/10 hover:bg-blue-500/10 transition-all"
+          >
+            <span className="material-icons-round text-blue-400 text-sm">share</span>
+            <span className="text-[10px] font-bold text-blue-300 uppercase tracking-widest">Share Session</span>
+          </button>
         </div>
 
         <div className="p-6 overflow-y-auto custom-scroll flex-1">

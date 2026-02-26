@@ -30,6 +30,41 @@ const Onboarding: React.FC<Props> = ({ onSelect }) => {
       icon: 'favorite' 
     },
     { 
+      id: Genre.ROCK, 
+      title: 'Rock / Indie', 
+      desc: 'Raw energy, powerful metaphors, gritty vibes.', 
+      color: 'from-[#F59E0B] to-[#B45309]', 
+      icon: 'electric_bolt' 
+    },
+    { 
+      id: Genre.COUNTRY, 
+      title: 'Country / Folk', 
+      desc: 'Honest stories, narrative depth, grounded vibes.', 
+      color: 'from-[#84CC16] to-[#3F6212]', 
+      icon: 'grass' 
+    },
+    { 
+      id: Genre.METAL, 
+      title: 'Metal / Core', 
+      desc: 'Visceral intensity, complex structures, dark vibes.', 
+      color: 'from-[#4B5563] to-[#111827]', 
+      icon: 'whatshot' 
+    },
+    { 
+      id: Genre.JAZZ, 
+      title: 'Jazz / Blues', 
+      desc: 'Sophisticated subtext, smooth flows, elegant vibes.', 
+      color: 'from-[#6366F1] to-[#312E81]', 
+      icon: 'piano' 
+    },
+    { 
+      id: Genre.ELECTRONIC, 
+      title: 'Electronic / EDM', 
+      desc: 'Minimalist rhythms, hypnotic phrases, futuristic vibes.', 
+      color: 'from-[#06B6D4] to-[#164E63]', 
+      icon: 'memory' 
+    },
+    { 
       id: Genre.CUSTOM, 
       title: 'Custom Muse', 
       desc: 'Train AI on your specific artist reference.', 
@@ -39,8 +74,8 @@ const Onboarding: React.FC<Props> = ({ onSelect }) => {
   ];
 
   return (
-    <div className="min-h-screen p-8 max-w-lg mx-auto flex flex-col justify-center animate-in fade-in slide-in-from-bottom-6 duration-1000">
-      <header className="mb-12 text-center">
+    <div className="min-h-screen p-8 max-w-lg mx-auto flex flex-col animate-in fade-in slide-in-from-bottom-6 duration-1000">
+      <header className="mb-12 mt-12 text-center">
         <h2 className="text-5xl font-black metallic-text font-['Orbitron'] tracking-tighter mb-3">Meet Your Muse</h2>
         <p className="text-gray-500 font-bold uppercase text-[10px] tracking-[0.4em]">Select your signature style for AI calibration</p>
       </header>

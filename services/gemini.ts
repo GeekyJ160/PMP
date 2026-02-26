@@ -30,6 +30,21 @@ export const getLyricSuggestions = async (
       case Genre.RNB:
         persona = "You are a soulful R&B balladeer and vocal storyteller. Your style is intimate, passionate, and emotionally raw. Focus on vulnerability, sensual imagery, smooth cadences, and poetic expressions of love, heartbreak, and desire. Your lyrics should feel deeply personal and evocative.";
         break;
+      case Genre.ROCK:
+        persona = "You are a stadium-filling rock icon. Your style is raw, energetic, and rebellious. Focus on powerful metaphors, social commentary, gritty imagery, and anthemic choruses. Your lyrics should evoke the spirit of rock and roll, with a mix of introspection and high-octane energy.";
+        break;
+      case Genre.COUNTRY:
+        persona = "You are a Nashville-based country storyteller. Your style is honest, narrative-driven, and grounded. Focus on vivid storytelling, relatable life experiences, themes of home, family, and resilience, and simple, heartfelt rhyme schemes. Your lyrics should paint a picture of rural life and human emotion.";
+        break;
+      case Genre.METAL:
+        persona = "You are a dark, intense metal lyricist. Your style is visceral, complex, and often explores themes of mythology, philosophy, or societal decay. Focus on powerful, often abstract imagery, aggressive metaphors, and intricate rhythmic structures. Your lyrics should be as heavy and impactful as the music.";
+        break;
+      case Genre.JAZZ:
+        persona = "You are a sophisticated jazz lyricist and poet. Your style is smooth, improvisational, and rich in subtext. Focus on abstract concepts, urban imagery, complex emotional nuances, and a rhythmic flow that feels like a conversation. Your lyrics should be elegant and intellectually stimulating.";
+        break;
+      case Genre.ELECTRONIC:
+        persona = "You are a futuristic electronic music producer and lyricist. Your style is minimalist, rhythmic, and often atmospheric. Focus on repetitive, hypnotic phrases, technological metaphors, and a flow that complements synthesized soundscapes. Your lyrics should feel like a part of the machine, yet deeply human.";
+        break;
       default:
         persona = "You are a highly versatile, professional songwriter capable of adapting to any style. Focus on strong structure, clear messaging, and engaging phrasing.";
     }
@@ -105,6 +120,11 @@ export const getRhymeSuggestions = async (
     [Genre.RAP]: "Prioritize multi-syllabic rhymes, internal rhymes, and slant rhymes (assonance). The tone should be sharp and rhythmically dense.",
     [Genre.POP]: "Focus on perfect rhymes, catchy phonetics, and clear, simple sounds that work well in a melodic hook.",
     [Genre.RNB]: "Emphasize smooth, vowel-heavy rhymes that allow for vocal runs and emotional expression.",
+    [Genre.ROCK]: "Use a mix of strong, direct rhymes and more abstract, metaphorical connections. The tone should be energetic and resonant.",
+    [Genre.COUNTRY]: "Focus on clear, narrative-friendly rhymes that feel natural and conversational. Perfect rhymes are common but should feel earned.",
+    [Genre.METAL]: "Prioritize dark, evocative rhymes and complex, multi-syllabic structures that match the intensity of the genre.",
+    [Genre.JAZZ]: "Emphasize sophisticated, often unexpected rhymes and internal assonance that feels improvisational and smooth.",
+    [Genre.ELECTRONIC]: "Focus on rhythmic, repetitive rhymes and technological or atmospheric word choices that blend with synthesized sounds.",
     [Genre.CUSTOM]: "Provide a wide experimental variety of rhymes that bridge various musical styles."
   };
 

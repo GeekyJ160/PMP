@@ -24,12 +24,15 @@ const App: React.FC = () => {
   });
 
   const [lyrics, setLyrics] = useState("Started from the bottom now we're here...");
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('project');
+  });
 
   // Initial Load
   useEffect(() => {
     const lastSession = localStorage.getItem(STORAGE_KEY);
-    if (lastSession) {
+    if (lastSession && !currentProjectId) {
       try {
         const saved: SongProject = JSON.parse(lastSession);
         setUserState(saved.userState);
@@ -42,13 +45,22 @@ const App: React.FC = () => {
 
     if (screen === 'splash') {
       const timer = setTimeout(() => {
-        // If we have a session, skip onboarding and voice
-        if (lastSession) setScreen('studio');
+        // If we have a session or a project ID in URL, skip onboarding and voice
+        if (lastSession || currentProjectId) setScreen('studio');
         else setScreen('onboarding');
       }, 3500);
       return () => clearTimeout(timer);
     }
   }, []);
+
+  // Sync currentProjectId to URL
+  useEffect(() => {
+    if (currentProjectId) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('project', currentProjectId);
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [currentProjectId]);
 
   // Auto-Save Effect
   useEffect(() => {
@@ -133,6 +145,7 @@ const App: React.FC = () => {
           onUpdateInstrumental={updateInstrumental}
           onLoadProject={loadProject}
           onCreateNew={createNewProject}
+          currentProjectId={currentProjectId}
         />
       )}
       

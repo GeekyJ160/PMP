@@ -5,6 +5,11 @@ export enum Genre {
   RAP = 'RAP',
   POP = 'POP',
   RNB = 'RNB',
+  ROCK = 'ROCK',
+  COUNTRY = 'COUNTRY',
+  METAL = 'METAL',
+  JAZZ = 'JAZZ',
+  ELECTRONIC = 'ELECTRONIC',
   CUSTOM = 'CUSTOM'
 }
 
