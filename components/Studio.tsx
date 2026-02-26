@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { UserState, LyricSuggestion, InstrumentalData, AppScreen, Genre, SongProject } from '../types';
+import { UserState, LyricSuggestion, InstrumentalData, AppScreen, Genre, SongProject, GENRE_PERSONAS } from '../types';
 import { getLyricSuggestions, getRhymeSuggestions, analyzeInstrumental } from '../services/gemini';
 import SuggestionCard from './SuggestionCard';
 import BeatVisualizer from './BeatVisualizer';
@@ -17,9 +17,10 @@ interface Props {
   onLoadProject: (project: SongProject) => void;
   onCreateNew: () => void;
   currentProjectId: string | null;
+  onUpdatePersona: (subPersonaId: string) => void;
 }
 
-const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onShowStats, onUpdateInstrumental, onLoadProject, onCreateNew, currentProjectId }) => {
+const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onShowStats, onUpdateInstrumental, onLoadProject, onCreateNew, currentProjectId, onUpdatePersona }) => {
   const [suggestions, setSuggestions] = useState<LyricSuggestion[]>([]);
   const [rhymes, setRhymes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -249,7 +250,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   const fetchSuggestions = useCallback(async () => {
     if (!lyrics.trim() || lyrics.length < 5) return;
     setLoading(true);
-    const res = await getLyricSuggestions(lyrics, userState.genre, userState.instrumental, userState.artistModeEnabled);
+    const res = await getLyricSuggestions(lyrics, userState.genre, userState.instrumental, userState.artistModeEnabled, userState.subPersona);
     setSuggestions(res);
     setLoading(false);
   }, [lyrics, userState]);
@@ -697,22 +698,29 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
         </div>
 
         <div className="px-6 pt-4 pb-2 space-y-2">
-          <div className="flex items-center gap-2 px-3 py-2 bg-white/5 rounded-lg border border-white/10">
-            <span className="material-icons-round text-purple-400 text-sm">psychology</span>
-            <div className="flex flex-col">
-              <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Active Persona</span>
-              <span className="text-[10px] font-bold text-gray-300">
-                {userState.artistModeEnabled ? 'Ghostwriter' : 
-                 userState.genre === Genre.RAP ? 'Battle Rapper' : 
-                 userState.genre === Genre.POP ? 'Hitmaker' : 
-                 userState.genre === Genre.RNB ? 'Soulful Balladeer' : 
-                 userState.genre === Genre.ROCK ? 'Rock Icon' :
-                 userState.genre === Genre.COUNTRY ? 'Country Storyteller' :
-                 userState.genre === Genre.METAL ? 'Metal Lyricist' :
-                 userState.genre === Genre.JAZZ ? 'Jazz Poet' :
-                 userState.genre === Genre.ELECTRONIC ? 'Electronic Producer' : 'Versatile Writer'}
-              </span>
+          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-white/5 rounded-lg border border-white/10">
+            <div className="flex items-center gap-2">
+              <span className="material-icons-round text-purple-400 text-sm">psychology</span>
+              <div className="flex flex-col">
+                <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Active Persona</span>
+                <span className="text-[10px] font-bold text-gray-300">
+                  {userState.artistModeEnabled ? 'Ghostwriter' : 
+                   (GENRE_PERSONAS[userState.genre]?.find(p => p.id === userState.subPersona)?.name || GENRE_PERSONAS[userState.genre]?.[0]?.name || 'Versatile Writer')}
+                </span>
+              </div>
             </div>
+            
+            {!userState.artistModeEnabled && GENRE_PERSONAS[userState.genre]?.length > 1 && (
+              <select 
+                value={userState.subPersona || GENRE_PERSONAS[userState.genre][0].id}
+                onChange={(e) => onUpdatePersona(e.target.value)}
+                className="bg-black/40 border border-white/10 text-white text-[10px] rounded px-2 py-1 outline-none focus:border-purple-500/50"
+              >
+                {GENRE_PERSONAS[userState.genre].map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            )}
           </div>
           
           <div className="flex items-center gap-2 px-3 py-2 bg-green-500/5 rounded-lg border border-green-500/10">

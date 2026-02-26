@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Genre, LyricSuggestion, InstrumentalData } from "../types";
+import { Genre, LyricSuggestion, InstrumentalData, GENRE_PERSONAS } from "../types";
 
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -8,7 +8,8 @@ export const getLyricSuggestions = async (
   context: string,
   genre: Genre,
   instrumental?: InstrumentalData | null,
-  artistMode?: boolean
+  artistMode?: boolean,
+  subPersonaId?: string
 ): Promise<LyricSuggestion[]> => {
   const ai = getAI();
   const bpm = instrumental?.bpm || 90;
@@ -20,34 +21,9 @@ export const getLyricSuggestions = async (
   if (artistMode) {
     persona = "You are a multi-platinum, award-winning ghostwriter. Your writing is complex, utilizing sophisticated multi-syllabic rhymes, intricate internal rhyme schemes, and deep thematic cohesion. You write lyrics that are critically acclaimed and commercially successful.";
   } else {
-    switch (genre) {
-      case Genre.RAP:
-        persona = "You are a legendary battle rapper and lyrical architect. Your style is aggressive, witty, and highly technical. Focus on heavy punchlines, double entendres, complex multi-syllabic rhyme schemes, and relentless rhythmic variety. Your lyrics should hit hard and demand attention.";
-        break;
-      case Genre.POP:
-        persona = "You are a chart-topping pop hitmaker. Your style is infectious, relatable, and melodically driven. Focus on catchy imagery, universal emotional hooks, simple but effective rhyme schemes, and memorable choruses that get stuck in the listener's head. Your lyrics should be anthemic and radio-ready.";
-        break;
-      case Genre.RNB:
-        persona = "You are a soulful R&B balladeer and vocal storyteller. Your style is intimate, passionate, and emotionally raw. Focus on vulnerability, sensual imagery, smooth cadences, and poetic expressions of love, heartbreak, and desire. Your lyrics should feel deeply personal and evocative.";
-        break;
-      case Genre.ROCK:
-        persona = "You are a stadium-filling rock icon. Your style is raw, energetic, and rebellious. Focus on powerful metaphors, social commentary, gritty imagery, and anthemic choruses. Your lyrics should evoke the spirit of rock and roll, with a mix of introspection and high-octane energy.";
-        break;
-      case Genre.COUNTRY:
-        persona = "You are a Nashville-based country storyteller. Your style is honest, narrative-driven, and grounded. Focus on vivid storytelling, relatable life experiences, themes of home, family, and resilience, and simple, heartfelt rhyme schemes. Your lyrics should paint a picture of rural life and human emotion.";
-        break;
-      case Genre.METAL:
-        persona = "You are a dark, intense metal lyricist. Your style is visceral, complex, and often explores themes of mythology, philosophy, or societal decay. Focus on powerful, often abstract imagery, aggressive metaphors, and intricate rhythmic structures. Your lyrics should be as heavy and impactful as the music.";
-        break;
-      case Genre.JAZZ:
-        persona = "You are a sophisticated jazz lyricist and poet. Your style is smooth, improvisational, and rich in subtext. Focus on abstract concepts, urban imagery, complex emotional nuances, and a rhythmic flow that feels like a conversation. Your lyrics should be elegant and intellectually stimulating.";
-        break;
-      case Genre.ELECTRONIC:
-        persona = "You are a futuristic electronic music producer and lyricist. Your style is minimalist, rhythmic, and often atmospheric. Focus on repetitive, hypnotic phrases, technological metaphors, and a flow that complements synthesized soundscapes. Your lyrics should feel like a part of the machine, yet deeply human.";
-        break;
-      default:
-        persona = "You are a highly versatile, professional songwriter capable of adapting to any style. Focus on strong structure, clear messaging, and engaging phrasing.";
-    }
+    const genrePersonas = GENRE_PERSONAS[genre] || GENRE_PERSONAS[Genre.CUSTOM];
+    const selectedPersona = genrePersonas.find(p => p.id === subPersonaId) || genrePersonas[0];
+    persona = `You are a ${selectedPersona.name}. ${selectedPersona.prompt}`;
   }
 
   const musicalGrounding = instrumental ? `

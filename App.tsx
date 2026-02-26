@@ -146,6 +146,7 @@ const App: React.FC = () => {
           onLoadProject={loadProject}
           onCreateNew={createNewProject}
           currentProjectId={currentProjectId}
+          onUpdatePersona={(subPersonaId) => setUserState(prev => ({ ...prev, subPersona: subPersonaId }))}
         />
       )}
       
