@@ -25,7 +25,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   const [rhymes, setRhymes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [rhymesLoading, setRhymesLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'ai' | 'rhymes' | 'projects'>('ai');
+  const [activeTab, setActiveTab] = useState<'ai' | 'rhymes' | 'projects' | 'notes'>('ai');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [playbackActive, setPlaybackActive] = useState(false);
   const [volume, setVolume] = useState(0.8);
@@ -34,17 +34,19 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   const [socket, setSocket] = useState<Socket | null>(null);
   const [collaborators, setCollaborators] = useState<string[]>([]);
   const [isRemoteUpdate, setIsRemoteUpdate] = useState(false);
+  const [takes, setTakes] = useState<{id: number, url: string, name: string}[]>([]);
   
   // Recording State
   const [isRecordingPerformance, setIsRecordingPerformance] = useState(false);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
   const [recordingOffset, setRecordingOffset] = useState(0);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const performanceAudioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  
+  const [savedRange, setSavedRange] = useState<Range | null>(null);
 
   // Audio Processing Refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -118,62 +120,31 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   }, [lyrics, socket, currentProjectId]);
 
   const handleSelection = () => {
-    const el = textareaRef.current;
-    if (!el) return;
-
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const text = el.value;
-
-    if (start === end) {
-      const beforeStr = text.substring(0, start);
-      const afterStr = text.substring(start);
-      
-      const lastSpaceBefore = Math.max(beforeStr.lastIndexOf(' '), beforeStr.lastIndexOf('\n'));
-      const startIdx = lastSpaceBefore === -1 ? 0 : lastSpaceBefore + 1;
-
-      const firstSpaceAfter = afterStr.search(/[\s\n]/);
-      const endIdx = firstSpaceAfter === -1 ? text.length : start + firstSpaceAfter;
-
-      const word = text.substring(startIdx, endIdx).trim();
-      
-      if (word.length > 1) {
-        setSelectedWord({ 
-          text: word.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,""), 
-          start: startIdx, 
-          end: endIdx 
-        });
-      } else {
-        setSelectedWord(null);
-      }
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    
+    const text = selection.toString().trim();
+    if (text && !text.includes(' ') && !text.includes('\n')) {
+      setSelectedWord({ text, start: 0, end: 0 });
+      setSavedRange(selection.getRangeAt(0).cloneRange());
     } else {
-      const selection = text.substring(start, end).trim();
-      if (selection && !selection.includes(' ') && !selection.includes('\n')) {
-        setSelectedWord({ text: selection, start, end });
-      } else {
-        setSelectedWord(null);
-      }
+      setSelectedWord(null);
+      setSavedRange(null);
     }
   };
 
   const applyRhyme = (rhyme: string) => {
-    if (!selectedWord || !textareaRef.current) return;
+    if (!selectedWord || !textareaRef.current || !savedRange) return;
     
-    const prefix = lyrics.substring(0, selectedWord.start);
-    const suffix = lyrics.substring(selectedWord.end);
-    const newLyrics = prefix + rhyme + suffix;
+    const selection = window.getSelection();
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(savedRange);
+      document.execCommand('insertText', false, rhyme);
+    }
     
-    const newCursorPos = selectedWord.start + rhyme.length;
-    
-    setLyrics(newLyrics);
     setSelectedWord(null);
-    
-    requestAnimationFrame(() => {
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
-      }
-    });
+    setSavedRange(null);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -247,10 +218,17 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     }
   };
 
+  useEffect(() => {
+    if (textareaRef.current && lyrics !== textareaRef.current.innerHTML) {
+      textareaRef.current.innerHTML = lyrics;
+    }
+  }, [lyrics]);
+
   const fetchSuggestions = useCallback(async () => {
-    if (!lyrics.trim() || lyrics.length < 5) return;
+    const plainText = lyrics.replace(/<[^>]*>?/gm, '');
+    if (!plainText.trim() || plainText.length < 5) return;
     setLoading(true);
-    const res = await getLyricSuggestions(lyrics, userState.genre, userState.instrumental, userState.artistModeEnabled, userState.subPersona);
+    const res = await getLyricSuggestions(plainText, userState.genre, userState.instrumental, userState.artistModeEnabled, userState.subPersona);
     setSuggestions(res);
     setLoading(false);
   }, [lyrics, userState]);
@@ -258,9 +236,8 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   const fetchRhymes = useCallback(async () => {
     if (!selectedWord) return;
     setRhymesLoading(true);
-    const contextStart = Math.max(0, selectedWord.start - 100);
-    const contextEnd = Math.min(lyrics.length, selectedWord.end + 100);
-    const snippet = lyrics.substring(contextStart, contextEnd);
+    const plainText = lyrics.replace(/<[^>]*>?/gm, '');
+    const snippet = plainText.length > 200 ? plainText.substring(plainText.length - 200) : plainText;
     
     const res = await getRhymeSuggestions(selectedWord.text, userState.genre, snippet, userState.instrumental?.bpm);
     setRhymes(res);
@@ -272,13 +249,6 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
       fetchRhymes();
     }
   }, [selectedWord, activeTab, fetchRhymes]);
-
-  const handleScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = e.currentTarget.scrollTop;
-      scrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
-    }
-  };
 
   const togglePlayback = () => {
     if (!audioRef.current) return;
@@ -390,6 +360,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
         const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
         const url = URL.createObjectURL(blob);
         setRecordedAudioUrl(url);
+        setTakes(prev => [...prev, { id: Date.now(), url, name: `Take ${prev.length + 1}` }]);
         micStream.getTracks().forEach(track => track.stop());
       };
 
@@ -582,6 +553,35 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
                 </div>
               )}
             </div>
+
+            {takes.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center px-2">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Takes Vault</p>
+                  <span className="text-[10px] font-black text-purple-400">({takes.length})</span>
+                </div>
+                <div className="space-y-2 max-h-40 overflow-y-auto custom-scroll">
+                  {takes.map(take => (
+                    <div key={take.id} className="flex items-center justify-between p-2.5 bg-white/5 rounded-xl border border-white/5 hover:bg-white/10 transition-all">
+                      <span className="text-xs font-bold text-gray-300 px-2 truncate">{take.name}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => {
+                          setRecordedAudioUrl(take.url);
+                          if (performanceAudioRef.current) {
+                            performanceAudioRef.current.src = take.url;
+                            performanceAudioRef.current.play();
+                          }
+                        }} className="p-1.5 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/40" title="Play Take"><span className="material-icons-round text-sm">play_arrow</span></button>
+                        <button onClick={() => {
+                          setTakes(prev => prev.filter(t => t.id !== take.id));
+                          if (recordedAudioUrl === take.url) setRecordedAudioUrl(null);
+                        }} className="p-1.5 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/40" title="Delete Take"><span className="material-icons-round text-sm">delete</span></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -634,33 +634,59 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
           </div>
         </header>
 
-        <div className="flex-1 relative overflow-hidden">
-          <div 
-            ref={scrollRef}
-            className="absolute inset-0 p-12 text-3xl font-mono pointer-events-none editor-metrics whitespace-pre-wrap select-none overflow-hidden leading-[1.6] text-transparent"
-            aria-hidden="true"
-          >
-            {renderHighlights()}
+        <div className="flex-1 relative flex flex-col m-6 bg-[#121226]/80 rounded-[2rem] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-md">
+          {/* Notepad Toolbar */}
+          <div className="h-14 bg-white/5 border-b border-white/10 flex items-center px-6 justify-between">
+             <div className="flex gap-2">
+                <button onClick={() => document.execCommand('bold')} className="p-2 hover:bg-white/10 rounded-xl text-gray-400 transition-all" title="Bold"><span className="material-icons-round text-sm">format_bold</span></button>
+                <button onClick={() => document.execCommand('italic')} className="p-2 hover:bg-white/10 rounded-xl text-gray-400 transition-all" title="Italic"><span className="material-icons-round text-sm">format_italic</span></button>
+                <button onClick={() => document.execCommand('insertUnorderedList')} className="p-2 hover:bg-white/10 rounded-xl text-gray-400 transition-all" title="Bullet List"><span className="material-icons-round text-sm">format_list_bulleted</span></button>
+                <div className="w-px h-4 bg-white/10 mx-1 self-center"></div>
+                <button onClick={() => setLyrics('')} className="p-2 hover:bg-white/10 rounded-xl text-gray-400 transition-all" title="Clear Pad"><span className="material-icons-round text-sm">delete_outline</span></button>
+                <button onClick={() => navigator.clipboard.writeText(lyrics.replace(/<[^>]*>?/gm, ''))} className="p-2 hover:bg-white/10 rounded-xl text-gray-400 transition-all" title="Copy Lyrics"><span className="material-icons-round text-sm">content_copy</span></button>
+             </div>
+             {/* Live Scores */}
+             <div className="flex gap-8">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Flow</span>
+                  <span className="text-lg font-black text-emerald-400">{Math.min(99, 60 + Math.floor(lyrics.replace(/<[^>]*>?/gm, '').length / 10))}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Rhyme</span>
+                  <span className="text-lg font-black text-purple-400">{Math.min(99, 50 + (lyrics.match(/<br>|\n|<li>/g)?.length || 0) * 2)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Energy</span>
+                  <span className="text-lg font-black text-orange-400">{userState.instrumental?.energy || 76}</span>
+                </div>
+             </div>
           </div>
 
-          <textarea
-            ref={textareaRef}
-            value={lyrics}
-            onSelect={handleSelection}
-            onScroll={handleScroll}
-            onChange={(e) => {
-              setLyrics(e.target.value);
-              if (selectedWord) setSelectedWord(null);
-            }}
-            placeholder="Lay your bars here..."
-            className="absolute inset-0 w-full h-full bg-transparent p-12 text-3xl font-mono border-none focus:ring-0 resize-none text-gray-200 custom-scroll z-10 leading-[1.6] placeholder:text-white/5"
-            spellCheck={false}
-          />
+          {/* Textarea Container */}
+          <div className="flex-1 relative">
+            <div
+              ref={textareaRef}
+              contentEditable
+              suppressContentEditableWarning
+              onMouseUp={handleSelection}
+              onKeyUp={handleSelection}
+              onInput={(e) => {
+                setLyrics(e.currentTarget.innerHTML);
+                if (selectedWord) {
+                  setSelectedWord(null);
+                  setSavedRange(null);
+                }
+              }}
+              placeholder="Texas heat cracklin'... Start spitting"
+              className="absolute inset-0 w-full h-full bg-transparent p-10 text-2xl font-mono border-none focus:ring-0 resize-none text-gray-100 custom-scroll z-10 leading-[1.8] outline-none empty:before:content-[attr(placeholder)] empty:before:text-white/20"
+              spellCheck={false}
+            />
+          </div>
         </div>
 
         <footer className="px-8 py-4 border-t border-white/5 bg-black/20 flex justify-between text-[10px] font-black text-gray-500 uppercase tracking-widest z-30">
           <div className="flex gap-4 items-center">
-            <span>Words: {lyrics.trim() ? lyrics.trim().split(/\s+/).length : 0}</span>
+            <span>Words: {lyrics.replace(/<[^>]*>?/gm, '').trim() ? lyrics.replace(/<[^>]*>?/gm, '').trim().split(/\s+/).length : 0}</span>
             <div className="w-px h-3 bg-white/10 mx-1"></div>
             {selectedWord && <span className="text-purple-400 animate-pulse">Scanning: "{selectedWord.text}"</span>}
           </div>
@@ -694,6 +720,12 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
             className={`flex-1 py-3 text-[10px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-2 ${activeTab === 'rhymes' ? 'bg-[#1E1E38] text-white border border-white/10 shadow-inner' : 'text-gray-500 hover:text-gray-300'}`}
           >
             <span className="material-icons-round text-xs">token</span> Vault
+          </button>
+          <button 
+            onClick={() => setActiveTab('notes')} 
+            className={`flex-1 py-3 text-[10px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-2 ${activeTab === 'notes' ? 'bg-[#1E1E38] text-white border border-white/10 shadow-inner' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            <span className="material-icons-round text-xs">edit_note</span> Notes
           </button>
         </div>
 
@@ -754,11 +786,12 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
                   key={i} 
                   suggestion={s} 
                   onInsert={(txt) => {
-                    const cursor = textareaRef.current?.selectionStart || lyrics.length;
-                    const pre = lyrics.slice(0, cursor);
-                    const post = lyrics.slice(cursor);
-                    setLyrics(pre + (pre.endsWith('\n') || pre === '' ? '' : '\n') + txt + post);
-                    textareaRef.current?.focus();
+                    setLyrics(prev => prev + (prev ? '<br><br>' : '') + txt);
+                    setTimeout(() => {
+                      if (textareaRef.current) {
+                        textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
+                      }
+                    }, 50);
                   }} 
                   delay={i * 100} 
                 />
@@ -858,6 +891,29 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
               >
                 + New Manuscript
               </button>
+            </div>
+          )}
+
+          {activeTab === 'notes' && (
+            <div className="space-y-4 flex flex-col h-full animate-in fade-in slide-in-from-bottom-4">
+              <header className="space-y-2">
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Scratchpad</p>
+                <h3 className="text-xl font-bold text-white uppercase tracking-tighter">Global Notes</h3>
+              </header>
+              <div className="flex gap-2 bg-white/5 p-2 rounded-xl border border-white/10">
+                <button onClick={() => document.execCommand('bold')} className="p-1.5 hover:bg-white/10 rounded text-gray-300 transition-all" title="Bold"><span className="material-icons-round text-sm">format_bold</span></button>
+                <button onClick={() => document.execCommand('italic')} className="p-1.5 hover:bg-white/10 rounded text-gray-300 transition-all" title="Italic"><span className="material-icons-round text-sm">format_italic</span></button>
+                <button onClick={() => document.execCommand('insertUnorderedList')} className="p-1.5 hover:bg-white/10 rounded text-gray-300 transition-all" title="Bullet List"><span className="material-icons-round text-sm">format_list_bulleted</span></button>
+              </div>
+              <div 
+                className="flex-1 bg-white/5 rounded-2xl border border-white/10 p-4 text-sm text-gray-200 focus:outline-none focus:border-purple-500/50 custom-scroll overflow-y-auto"
+                contentEditable
+                suppressContentEditableWarning
+                onInput={(e) => {
+                  localStorage.setItem('pmp_general_notes', e.currentTarget.innerHTML);
+                }}
+                dangerouslySetInnerHTML={{ __html: localStorage.getItem('pmp_general_notes') || '' }}
+              />
             </div>
           )}
         </div>
