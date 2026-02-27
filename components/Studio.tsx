@@ -42,6 +42,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   const [recordingOffset, setRecordingOffset] = useState(0);
 
   const textareaRef = useRef<HTMLDivElement>(null);
+  const notesRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const performanceAudioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -643,7 +644,11 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
                 <button onClick={() => document.execCommand('insertUnorderedList')} className="p-2 hover:bg-white/10 rounded-xl text-gray-400 transition-all" title="Bullet List"><span className="material-icons-round text-sm">format_list_bulleted</span></button>
                 <div className="w-px h-4 bg-white/10 mx-1 self-center"></div>
                 <button onClick={() => setLyrics('')} className="p-2 hover:bg-white/10 rounded-xl text-gray-400 transition-all" title="Clear Pad"><span className="material-icons-round text-sm">delete_outline</span></button>
-                <button onClick={() => navigator.clipboard.writeText(lyrics.replace(/<[^>]*>?/gm, ''))} className="p-2 hover:bg-white/10 rounded-xl text-gray-400 transition-all" title="Copy Lyrics"><span className="material-icons-round text-sm">content_copy</span></button>
+                <button onClick={() => {
+                  const plainText = textareaRef.current?.innerText || '';
+                  navigator.clipboard.writeText(plainText);
+                  alert('Lyrics copied to clipboard!');
+                }} className="p-2 hover:bg-white/10 rounded-xl text-gray-400 transition-all" title="Copy Lyrics"><span className="material-icons-round text-sm">content_copy</span></button>
              </div>
              {/* Live Scores */}
              <div className="flex gap-8">
@@ -900,12 +905,26 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
                 <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Scratchpad</p>
                 <h3 className="text-xl font-bold text-white uppercase tracking-tighter">Global Notes</h3>
               </header>
-              <div className="flex gap-2 bg-white/5 p-2 rounded-xl border border-white/10">
+              <div className="flex gap-2 bg-white/5 p-2 rounded-xl border border-white/10 items-center">
                 <button onClick={() => document.execCommand('bold')} className="p-1.5 hover:bg-white/10 rounded text-gray-300 transition-all" title="Bold"><span className="material-icons-round text-sm">format_bold</span></button>
                 <button onClick={() => document.execCommand('italic')} className="p-1.5 hover:bg-white/10 rounded text-gray-300 transition-all" title="Italic"><span className="material-icons-round text-sm">format_italic</span></button>
                 <button onClick={() => document.execCommand('insertUnorderedList')} className="p-1.5 hover:bg-white/10 rounded text-gray-300 transition-all" title="Bullet List"><span className="material-icons-round text-sm">format_list_bulleted</span></button>
+                <div className="w-px h-4 bg-white/10 mx-1"></div>
+                <button 
+                  onClick={() => {
+                    if (notesRef.current) {
+                      notesRef.current.innerHTML = '';
+                      localStorage.setItem('pmp_general_notes', '');
+                    }
+                  }} 
+                  className="p-1.5 hover:bg-white/10 rounded text-gray-300 transition-all" 
+                  title="Clear Notes"
+                >
+                  <span className="material-icons-round text-sm">delete_outline</span>
+                </button>
               </div>
               <div 
+                ref={notesRef}
                 className="flex-1 bg-white/5 rounded-2xl border border-white/10 p-4 text-sm text-gray-200 focus:outline-none focus:border-purple-500/50 custom-scroll overflow-y-auto"
                 contentEditable
                 suppressContentEditableWarning
