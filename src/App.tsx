@@ -1,5 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Play, Square, Mic, Settings, Plus, Wand2, Download, Trash2, Upload, AlignLeft, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { 
+  Play, Pause, Square, Mic, Settings, Plus, Wand2, Download, 
+  Trash2, Upload, AlignLeft, RefreshCw, Bold, Italic, List, 
+  Pointer, Circle, Key, X,
+  Music, Bolt, Cloud, Zap
+} from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -7,422 +12,859 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Types
-interface LyricLine {
-  id: string;
-  text: string;
-  startBeat: number;
-  durationBeats: number;
-}
+// ─── CONSTANTS & DICTIONARIES ────────────────────────────────────
+
+const RD: Record<string, string[]> = {
+  ight: ['light', 'night', 'fight', 'right', 'might', 'tight', 'sight', 'bite', 'write', 'bright', 'flight', 'ignite', 'despite', 'invite'],
+  ow: ['flow', 'glow', 'blow', 'show', 'grow', 'slow', 'throw', 'below', 'bestow', 'vertigo'],
+  eat: ['beat', 'heat', 'street', 'meet', 'feat', 'sweet', 'treat', 'defeat', 'elite', 'repeat', 'compete'],
+  ame: ['flame', 'game', 'name', 'same', 'fame', 'claim', 'became', 'acclaim', 'reclaim'],
+  ing: ['king', 'ring', 'sing', 'bring', 'thing', 'swing', 'sting', 'spring', 'bling', 'everything'],
+  ack: ['back', 'track', 'stack', 'crack', 'black', 'attack', 'setback', 'knack'],
+  ine: ['line', 'shine', 'mine', 'fine', 'sign', 'design', 'divine', 'define', 'incline'],
+  urn: ['turn', 'burn', 'learn', 'yearn', 'return', 'concern', 'discern'],
+  un: ['run', 'gun', 'fun', 'sun', 'done', 'spun', 'outdone', 'overcome'],
+  ip: ['trip', 'flip', 'grip', 'drip', 'clip', 'slip', 'chip', 'equip'],
+  ash: ['cash', 'dash', 'flash', 'smash', 'crash', 'stash', 'clash'],
+  and: ['land', 'stand', 'hand', 'grand', 'band', 'command', 'expand', 'demand'],
+  ire: ['fire', 'wire', 'hire', 'higher', 'empire', 'desire', 'inspire', 'entire'],
+  ound: ['sound', 'round', 'found', 'ground', 'bound', 'pound', 'profound', 'surround'],
+  ain: ['pain', 'rain', 'gain', 'chain', 'train', 'insane', 'remain', 'explain'],
+  ear: ['fear', 'near', 'clear', 'year', 'appear', 'sincere', 'frontier'],
+  ake: ['take', 'make', 'break', 'shake', 'mistake', 'awake', 'forsake'],
+  ell: ['hell', 'bell', 'tell', 'sell', 'spell', 'yell', 'excel', 'compel'],
+  ive: ['drive', 'strive', 'arrive', 'thrive', 'survive', 'alive', 'revive'],
+  old: ['cold', 'bold', 'gold', 'hold', 'unfold', 'behold', 'controlled'],
+  eal: ['real', 'feel', 'deal', 'reveal', 'appeal', 'surreal', 'conceal'],
+  ay: ['way', 'day', 'say', 'play', 'stay', 'display', 'betray', 'relay'],
+  oom: ['room', 'bloom', 'doom', 'zoom', 'consume', 'perfume', 'assume'],
+  ar: ['car', 'star', 'far', 'bar', 'scar', 'guitar', 'bizarre'],
+  op: ['drop', 'stop', 'top', 'shop', 'nonstop', 'rooftop'],
+};
+
+const LOCAL_BANK = [
+  "ride the wave until the city fades to smoke",
+  "every lesson learned was just a different kind of broke",
+  "build the empire stone by stone in dead of night",
+  "they said I'd never make it now I'm burning bright",
+  "the pen's a weapon and the page is where I fight",
+  "move through darkness like a ghost and own the light",
+  "count the miles between the dream and where I stand",
+  "carve my name into the stone with my own hand",
+  "nothing given freely everything was earned through pain",
+  "even when the floods came I still danced in rain",
+];
+
+// ─── TYPES ───────────────────────────────────────────────────────
 
 interface Take {
   id: string;
   name: string;
-  startBeat: number;
-  durationBeats: number;
-  url?: string;
+  ts: string;
+  url: string;
+  bpm: number;
+  q: boolean;
 }
 
+// ─── UTILS ───────────────────────────────────────────────────────
+
+function sylWord(word: string) {
+  const exc: Record<string, number> = { the: 1, and: 1, for: 1, you: 1, are: 1, a: 1, i: 1, your: 1 };
+  const w = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (!w) return 0;
+  if (exc[w]) return exc[w];
+  let s = (w.match(/[aeiouy]+/g) || []).length;
+  if (w.match(/ower|ire/)) s++;
+  if (w.match(/tion|sion/)) s++;
+  if (w.endsWith('e') && s > 1) s--;
+  if (w.endsWith('le') && w.length > 2) s++;
+  return Math.max(1, s);
+}
+
+function sylLine(line: string) {
+  const matches = line.trim().match(/\b[\w']+\b/g);
+  if (!matches) return 0;
+  let count = 0;
+  for (const w of matches) {
+    count += sylWord(w);
+  }
+  return count;
+}
+
+function getLastWord(line: string) {
+  const m = (line || '').trim().match(/\b[\w']+\b/g);
+  return m ? m[m.length - 1].toLowerCase() : '';
+}
+
+function rhymes(a: string, b: string) {
+  const x = (a || '').replace(/[^a-z]/gi, '').toLowerCase();
+  const y = (b || '').replace(/[^a-z]/gi, '').toLowerCase();
+  return x && y && (x.slice(-4) === y.slice(-4) || x.slice(-3) === y.slice(-3));
+}
+
+function getRhymeScheme(lines: string[]) {
+  const ends = lines.map(l => getLastWord(l)).filter(Boolean);
+  let s = '', map: Record<string, string> = {}, cc = 65;
+  for (const w of ends) {
+    let found = null;
+    for (const k in map) {
+      if (rhymes(map[k], w)) {
+        found = k;
+        break;
+      }
+    }
+    if (found) s += found;
+    else {
+      const c = String.fromCharCode(cc++);
+      map[c] = w;
+      s += c;
+    }
+  }
+  return s || '—';
+}
+
+function getSugs(word: string) {
+  if (!word) return [];
+  const w = word.replace(/[^a-z]/g, '');
+  let out: string[] = [];
+  for (const k in RD) {
+    if (w.endsWith(k) || RD[k].includes(w)) {
+      out = [...RD[k]];
+      break;
+    }
+  }
+  if (!out.length) {
+    const t = w.slice(-3);
+    for (const k in RD) {
+      out.push(...RD[k].filter(x => x.endsWith(t)));
+    }
+  }
+  return [...new Set(out)].filter(x => x !== w).slice(0, 16);
+}
+
+// ─── MAIN COMPONENT ──────────────────────────────────────────────
+
 export default function App() {
-  const [bpm, setBpm] = useState(120);
+  // State
+  const [lyrics, setLyrics] = useState('');
+  const [bpm, setBpm] = useState(90);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [playheadBeat, setPlayheadBeat] = useState(0);
-  const [lyrics, setLyrics] = useState<LyricLine[]>([
-    { id: '1', text: 'Dallas nights, purple lights', startBeat: 0, durationBeats: 4 },
-    { id: '2', text: 'Pen ignites, syllables tight', startBeat: 4, durationBeats: 4 },
-    { id: '3', text: 'Riding the wave until the sun sets on my name', startBeat: 8, durationBeats: 4 },
-    { id: '4', text: 'Flip the page, another chapter starts to flame', startBeat: 12, durationBeats: 4 },
-  ]);
   const [takes, setTakes] = useState<Take[]>([]);
-  const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
-  const [aiPanelContent, setAiPanelContent] = useState<string>('Select a line to get AI suggestions.');
-  const [isAiLoading, setIsAiLoading] = useState(false);
   const [beatUrl, setBeatUrl] = useState<string | null>(null);
-  const [waveform, setWaveform] = useState<number[]>([]);
+  const [beatName, setBeatName] = useState('—');
+  const [bpmSource, setBpmSource] = useState('');
+  const [gridPos, setGridPos] = useState(0);
+  const [isMicOn, setIsMicOn] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
+  const [rhymeSuggestions, setRhymeSuggestions] = useState<string[]>([]);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [apiKey, setApiKey] = useState(localStorage.getItem('pmp5_key') || '');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
 
-  const handleBeatUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setBeatUrl(URL.createObjectURL(file));
-      // Mock waveform generation
-      const mockWaveform = Array.from({ length: totalBeats * 4 }, () => Math.random() * 0.8 + 0.1);
-      setWaveform(mockWaveform);
-    }
-  };
+  // Refs
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const micCtxRef = useRef<AudioContext | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const micIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const tapTimesRef = useRef<number[]>([]);
+  const gridIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const totalBeats = 64; // 16 bars of 4 beats
-  const beatsPerBar = 4;
-  const pixelsPerBeat = 40; // Width of one beat in pixels
-
-  // Playhead animation
+  // Load Draft
   useEffect(() => {
-    let interval: number;
-    if (isPlaying) {
-      const beatsPerSecond = bpm / 60;
-      const updateIntervalMs = 50;
-      const beatsPerUpdate = beatsPerSecond * (updateIntervalMs / 1000);
+    const d = JSON.parse(localStorage.getItem('pmp5') || '{}');
+    if (d.lyrics) setLyrics(d.lyrics);
+    if (d.bpm) setBpm(d.bpm);
+    if (d.takes) setTakes(d.takes.map((t: any) => ({ ...t, url: '' })));
+  }, []);
 
-      interval = window.setInterval(() => {
-        setPlayheadBeat((prev) => {
-          const next = prev + beatsPerUpdate;
-          return next > totalBeats ? 0 : next;
-        });
-      }, updateIntervalMs);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, bpm, totalBeats]);
-
-  const togglePlay = () => setIsPlaying(!isPlaying);
-  const toggleRec = () => {
-    if (isRecording) {
-      setIsRecording(false);
-      // Mock saving a take
-      const newTake: Take = {
-        id: Date.now().toString(),
-        name: `Take ${takes.length + 1}`,
-        startBeat: Math.floor(playheadBeat),
-        durationBeats: 4,
-      };
-      setTakes([...takes, newTake]);
-    } else {
-      setIsRecording(true);
-      if (!isPlaying) setIsPlaying(true);
-    }
-  };
-
-  const handleLineClick = (id: string) => {
-    setSelectedLineId(id);
-    const line = lyrics.find((l) => l.id === id);
-    if (line) {
-      setAiPanelContent(`Selected: "${line.text}"\n\nClick "Match Flow" or "Rewrite" for AI suggestions.`);
-    }
-  };
-
-  const handleLineChange = (id: string, newText: string) => {
-    setLyrics(lyrics.map((l) => (l.id === id ? { ...l, text: newText } : l)));
-  };
-
-  const addLine = () => {
-    const lastLine = lyrics[lyrics.length - 1];
-    const newStart = lastLine ? lastLine.startBeat + lastLine.durationBeats : 0;
-    const newLine: LyricLine = {
-      id: Date.now().toString(),
-      text: '',
-      startBeat: newStart,
-      durationBeats: 4,
-    };
-    setLyrics([...lyrics, newLine]);
-    setSelectedLineId(newLine.id);
-  };
-
-  const quantizeLine = () => {
-    if (!selectedLineId) return;
-    setLyrics(prev => prev.map(line => {
-      if (line.id === selectedLineId) {
-        // Quantize to nearest 1/4 beat (16th note)
-        const quantizedBeat = Math.round(line.startBeat * 4) / 4;
-        return { ...line, startBeat: quantizedBeat };
-      }
-      return line;
+  // Save Draft
+  useEffect(() => {
+    localStorage.setItem('pmp5', JSON.stringify({
+      lyrics,
+      bpm,
+      takes: takes.map(t => ({ name: t.name, ts: t.ts, q: t.q, bpm: t.bpm }))
     }));
-    setAiPanelContent(`Quantized line to nearest 1/16th note.`);
-  };
+  }, [lyrics, bpm, takes]);
 
-  const alignVocals = () => {
-    if (!selectedLineId) return;
-    setAiPanelContent('Aligning vocals to beat grid... (Simulated)');
-    setTimeout(() => {
-      quantizeLine();
-      setAiPanelContent('Vocals aligned and quantized successfully.');
-    }, 1000);
-  };
+  // Metrics Calculation
+  const lines = lyrics.split('\n');
+  const nonEmptyLines = lines.filter(l => l.trim());
+  const wordArr = (lyrics.match(/\b[\w']+\b/g) || []);
+  const totalSyl = wordArr.reduce((a, w) => a + sylWord(w), 0);
+  const lineCount = nonEmptyLines.length;
+  const density = wordArr.length / Math.max(1, lineCount);
+  const avgSyl = totalSyl / Math.max(1, lineCount);
+  const flowScore = Math.round(Math.max(0, Math.min(100, 50 + density * 6 + avgSyl * 2 - Math.abs(avgSyl - 12) * 2)));
+  const rhymeScheme = lineCount > 1 ? getRhymeScheme(nonEmptyLines) : '—';
 
-  const generateAI = (type: 'rewrite' | 'flow' | 'rhyme') => {
-    if (!selectedLineId) return;
-    const line = lyrics.find((l) => l.id === selectedLineId);
-    if (!line) return;
+  // AI Suggestions (Local)
+  useEffect(() => {
+    const lastLine = nonEmptyLines[nonEmptyLines.length - 1] || '';
+    if (lastLine.trim()) {
+      const seed = lastLine.trim();
+      const h = seed.split('').reduce((a, c) => a + c.charCodeAt(0), 37);
+      const suggestions = [0, 1, 2, 3].map(i => LOCAL_BANK[(h + i * 5) % LOCAL_BANK.length]);
+      setAiSuggestions(suggestions);
 
-    setIsAiLoading(true);
-    setAiPanelContent('Generating...');
+      const lastWord = getLastWord(seed);
+      setRhymeSuggestions(getSugs(lastWord));
+    } else {
+      setAiSuggestions([]);
+      setRhymeSuggestions([]);
+    }
+  }, [lyrics]);
 
-    // Mock AI generation
-    setTimeout(() => {
-      let result = '';
-      if (type === 'rewrite') {
-        result = `Rewrite suggestions for:\n"${line.text}"\n\n1. ${line.text} but harder\n2. ${line.text} but faster\n3. A completely different vibe`;
-      } else if (type === 'flow') {
-        result = `Flow match for:\n"${line.text}"\n\nTarget syllables: 8\n1. "Shadows fall, I hear the call"\n2. "Midnight strikes, we take the flight"`;
-      } else if (type === 'rhyme') {
-        const lastWord = line.text.split(' ').pop() || '';
-        result = `Rhymes for "${lastWord}":\n\n- tight\n- bright\n- flight\n- ignite\n- despite`;
+  // Grid Logic
+  const startGrid = useCallback(() => {
+    if (gridIntervalRef.current) clearInterval(gridIntervalRef.current);
+    gridIntervalRef.current = window.setInterval(() => {
+      setGridPos(prev => (prev + 1) % 16);
+    }, (60000 / bpm) / 4);
+  }, [bpm]);
+
+  useEffect(() => {
+    if (isPlaying || isRecording || beatUrl) {
+      startGrid();
+    } else {
+      if (gridIntervalRef.current) clearInterval(gridIntervalRef.current);
+      setGridPos(0);
+    }
+    return () => {
+      if (gridIntervalRef.current) clearInterval(gridIntervalRef.current);
+    };
+  }, [isPlaying, isRecording, beatUrl, startGrid]);
+
+  // Waveform Visualization
+  useEffect(() => {
+    if (!beatUrl || !analyserRef.current || !canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let rafId: number;
+    const draw = () => {
+      rafId = requestAnimationFrame(draw);
+      const analyser = analyserRef.current;
+      if (!analyser) return;
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      analyser.getByteFrequencyData(dataArray);
+
+      const W = canvas.width;
+      const H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+
+      const barWidth = (W / bufferLength) * 2.5;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const barHeight = (dataArray[i] / 255) * H;
+        const t = i / bufferLength;
+        const r = Math.round(60 + t * (155 - 60));
+        const g = Math.round(114 + t * (255 - 114));
+        const b = Math.round(255 - t * 255);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.45 + dataArray[i] / 512})`;
+        ctx.fillRect(x, H - barHeight, barWidth - 1, barHeight);
+        x += barWidth;
       }
-      setAiPanelContent(result);
+    };
+    draw();
+    return () => cancelAnimationFrame(rafId);
+  }, [beatUrl]);
+
+  // Handlers
+  const handleBeatUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith('audio/')) return;
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+
+    const url = URL.createObjectURL(file);
+    setBeatUrl(url);
+    setBeatName(file.name.slice(0, 32) + (file.name.length > 32 ? '…' : ''));
+
+    // Initialize Audio Context for Analyser
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    const ctx = audioCtxRef.current;
+    if (ctx.state === 'suspended') await ctx.resume();
+
+    const audio = new Audio(url);
+    audio.loop = true;
+    audioRef.current = audio;
+
+    const source = ctx.createMediaElementSource(audio);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    analyser.connect(ctx.destination);
+    analyserRef.current = analyser;
+
+    // BPM Detection from filename
+    const fnm = file.name.match(/(\d{2,3})\s?bpm/i);
+    if (fnm) {
+      const val = Math.max(60, Math.min(220, parseInt(fnm[1])));
+      setBpm(val);
+      setBpmSource('filename');
+    } else {
+      setBpmSource('tap to set');
+    }
+  };
+
+  const togglePlay = () => {
+    if (!beatUrl || !audioRef.current) {
+      alert('Load a beat first');
+      return;
+    }
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume();
+      audioRef.current.currentTime = 0;
+      audioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const toggleRec = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      chunksRef.current = [];
+
+      recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        const ts = new Date().toLocaleTimeString([], { timeStyle: 'short' });
+        const newTake: Take = {
+          id: Date.now().toString(),
+          name: `Take ${takes.length + 1}`,
+          ts,
+          url,
+          bpm,
+          q: !!beatUrl
+        };
+        setTakes(prev => [...prev, newTake]);
+        stream.getTracks().forEach(t => t.stop());
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      alert('Microphone access required');
+    }
+  };
+
+  const tapTempo = () => {
+    const now = Date.now();
+    const times = tapTimesRef.current.filter(t => now - t < 3500);
+    times.push(now);
+    tapTimesRef.current = times;
+
+    if (times.length >= 4) {
+      const diffs = times.slice(1).map((t, i) => t - times[i]);
+      const avg = diffs.reduce((a, b) => a + b) / diffs.length;
+      const val = Math.round(60000 / avg);
+      setBpm(val);
+      setBpmSource('tap');
+    }
+  };
+
+  const toggleMicBPM = async () => {
+    if (isMicOn) {
+      if (micIntervalRef.current) clearInterval(micIntervalRef.current);
+      setIsMicOn(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!micCtxRef.current) {
+        micCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = micCtxRef.current;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      micAnalyserRef.current = analyser;
+
+      const data = new Uint8Array(analyser.fftSize);
+      let peaks: number[] = [];
+      setIsMicOn(true);
+
+      micIntervalRef.current = window.setInterval(() => {
+        analyser.getByteTimeDomainData(data);
+        let peak = 0;
+        for (let i = 0; i < data.length; i++) {
+          peak = Math.max(peak, Math.abs(data[i] - 128));
+        }
+        if (peak > 50) {
+          const now = performance.now();
+          peaks = peaks.filter(t => now - t < 3000);
+          peaks.push(now);
+          if (peaks.length >= 4) {
+            const diffs = peaks.slice(1).map((t, i) => t - peaks[i]);
+            const avg = diffs.reduce((a, b) => a + b) / diffs.length;
+            setBpm(Math.round(60000 / avg));
+            setBpmSource('mic');
+          }
+        }
+      }, 80);
+    } catch (err) {
+      alert('Mic access needed');
+    }
+  };
+
+  const runAI = async (local: boolean) => {
+    if (!lyrics.trim()) return;
+    setIsAiLoading(true);
+    
+    if (local || !apiKey) {
+      await new Promise(r => setTimeout(r, 400));
+      // Local suggestions already updated via useEffect
       setIsAiLoading(false);
-    }, 800);
+      return;
+    }
+
+    // Cloud AI (Anthropic)
+    try {
+      const lastLines = nonEmptyLines.slice(-4).join('\n');
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "dangerouslyAllowBrowser": "true" // Note: This is for demo purposes in this environment
+        },
+        body: JSON.stringify({
+          model: "claude-3-sonnet-20240229",
+          max_tokens: 600,
+          system: "You are a world-class rap ghostwriter. Write 5 new bar suggestions that match the flow, syllable density, and rhyme scheme of the given bars. Return ONLY a JSON array of 5 strings.",
+          messages: [{ role: "user", content: `Last bars:\n${lastLines}\n\nWrite 5 continuation bars.` }]
+        })
+      });
+      const d = await res.json();
+      const raw = (d.content || []).map((b: any) => b.text || '').join('').replace(/```json|```/g, '').trim();
+      let linesArr: string[] = [];
+      try {
+        linesArr = JSON.parse(raw);
+      } catch {
+        linesArr = raw.split('\n').filter(Boolean).slice(0, 5);
+      }
+      setAiSuggestions(linesArr);
+    } catch (err) {
+      console.error(err);
+      alert('AI Error - check API key');
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const appendLine = (line: string) => {
+    setLyrics(prev => {
+      const v = prev.trim();
+      return v + (v && !v.endsWith('\n') ? '\n' : '') + line + '\n';
+    });
+  };
+
+  const insertRhyme = (word: string) => {
+    setLyrics(prev => {
+      const words = prev.trim().split(/\s+/);
+      words.push(word);
+      return words.join(' ') + ' ';
+    });
+  };
+
+  const clearAll = () => {
+    if (confirm('Clear all lyrics and takes?')) {
+      setLyrics('');
+      setTakes([]);
+    }
+  };
+
+  const doExport = () => {
+    const d = { lyrics, bpm, takes: takes.map(t => ({ name: t.name, ts: t.ts, bpm: t.bpm, q: t.q })), saved: new Date().toISOString(), v: '5' };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }));
+    a.download = `pmp5-${Date.now()}.json`;
+    a.click();
+  };
+
+  const doLoad = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const d = JSON.parse(r.result as string);
+        if (d.lyrics) setLyrics(d.lyrics);
+        if (d.bpm) setBpm(d.bpm);
+        if (d.takes) setTakes(d.takes.map((t: any) => ({ ...t, url: '' })));
+      } catch {
+        alert('Invalid file');
+      }
+    };
+    r.readAsText(f);
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#0b0b10] text-[#f0f0f5] font-mono overflow-hidden">
-      {/* TOPBAR */}
-      <div className="h-14 bg-[#111118] border-b border-[#ffffff0f] flex items-center px-4 gap-4 shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="font-['Bebas_Neue'] text-2xl text-[#e8ff47] tracking-wider leading-none">PMP</span>
-          <span className="text-[9px] text-[#5a5a72] tracking-widest uppercase mt-1">v8 Studio</span>
+    <div className="flex flex-col min-h-screen pb-32">
+      {/* HEADER */}
+      <header className="sticky top-0 z-50 flex items-center justify-between px-5 py-4 backdrop-blur-md bg-bg/80">
+        <div>
+          <div className="text-2xl font-black tracking-tighter bg-gradient-to-br from-[#c4a0ff] to-[#7f5aff] bg-clip-text text-transparent">
+            PMP
+          </div>
+          <div className="text-[10px] font-medium tracking-widest text-white/20 uppercase mt-0.5">
+            v5 &nbsp;•&nbsp; PRO
+          </div>
         </div>
-        
-        <div className="w-px h-6 bg-[#ffffff0f] mx-2" />
-
-        <button
-          onClick={togglePlay}
-          className={cn(
-            "flex items-center gap-2 px-4 py-1.5 rounded-md text-xs font-bold tracking-wide transition-all",
-            isPlaying ? "bg-[#ff4f6d] text-white" : "bg-[#e8ff47] text-black hover:bg-white"
-          )}
-        >
-          {isPlaying ? <Square size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-          {isPlaying ? 'STOP' : 'PLAY'}
-        </button>
-
-        <button
-          onClick={toggleRec}
-          className={cn(
-            "flex items-center gap-2 px-4 py-1.5 rounded-md text-xs font-bold tracking-wide transition-all",
-            isRecording ? "bg-[#8b001a] text-white animate-pulse" : "bg-[#ff4f6d] text-white hover:brightness-110"
-          )}
-        >
-          <Mic size={14} />
-          REC
-        </button>
-
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-[#17171f] border border-[#ffffff0f] rounded-full text-xs text-[#5a5a72]">
-          <span>BPM</span>
-          <input
-            type="number"
-            value={bpm}
-            onChange={(e) => setBpm(Number(e.target.value))}
-            className="w-12 bg-transparent text-white font-bold outline-none text-center"
-          />
-        </div>
-
-        <div className="ml-auto flex items-center gap-3">
-          <button className="p-2 text-[#5a5a72] hover:text-white transition-colors">
-            <Settings size={18} />
+        <div className="flex gap-2">
+          <button onClick={doExport} className="glass glass-hover w-9 h-9 rounded-xl flex items-center justify-center text-white/70">
+            <Download size={16} />
+          </button>
+          <label className="glass glass-hover w-9 h-9 rounded-xl flex items-center justify-center text-white/70 cursor-pointer">
+            <Upload size={16} />
+            <input type="file" accept=".json" className="hidden" onChange={doLoad} />
+          </label>
+          <button 
+            onClick={togglePlay} 
+            className={cn("glass glass-hover w-9 h-9 rounded-xl flex items-center justify-center transition-all", isPlaying ? "bg-teal/20 border-teal/40 text-teal" : "text-white/70")}
+          >
+            {isPlaying ? <Pause size={16} /> : <Play size={16} />}
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* MAIN WORKSPACE */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        
-        {/* TIMELINE HEADER */}
-        <div className="h-8 bg-[#0f0f15] border-b border-[#ffffff0f] relative overflow-hidden shrink-0">
-          <div className="absolute inset-0 flex">
-            {Array.from({ length: totalBeats }).map((_, i) => (
-              <div
-                key={i}
-                className={cn(
-                  "h-full border-r border-[#ffffff0f] flex items-end pb-1 px-1 text-[9px] text-[#5a5a72]",
-                  i % beatsPerBar === 0 ? "border-r-[#ffffff22]" : ""
-                )}
-                style={{ width: pixelsPerBeat, minWidth: pixelsPerBeat }}
-              >
-                {i % beatsPerBar === 0 ? `|${i / beatsPerBar + 1}` : ''}
-              </div>
-            ))}
-          </div>
-          {/* PLAYHEAD */}
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-[#e8ff47] z-20 pointer-events-none shadow-[0_0_10px_#e8ff47]"
-            style={{ left: playheadBeat * pixelsPerBeat }}
-          />
-        </div>
-
-        {/* TIMELINE TRACKS (Takes & Beat) */}
-        <div className="h-24 bg-[#111118] border-b border-[#ffffff0f] relative overflow-hidden shrink-0 flex flex-col">
-          <div className="absolute inset-0 flex pointer-events-none">
-            {Array.from({ length: totalBeats }).map((_, i) => (
-              <div
-                key={i}
-                className={cn(
-                  "h-full border-r border-[#ffffff05]",
-                  i % beatsPerBar === 0 ? "border-r-[#ffffff11]" : ""
-                )}
-                style={{ width: pixelsPerBeat, minWidth: pixelsPerBeat }}
-              />
-            ))}
-          </div>
-
-          {/* Beat Track (Waveform) */}
-          <div className="h-10 border-b border-[#ffffff0f] relative flex items-center px-2">
+      <main className="px-4 flex flex-col gap-4">
+        {/* BEAT SYNC */}
+        <section>
+          <div className="text-[10px] font-bold tracking-[0.14em] text-white/40 uppercase px-1 mb-2.5">Beat Sync</div>
+          <div 
+            className={cn(
+              "glass rounded-[26px] p-[18px] relative overflow-hidden transition-all duration-300",
+              beatUrl ? "shadow-[0_0_40px_rgba(155,114,255,0.18)]" : ""
+            )}
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-purple/15 to-transparent pointer-events-none" />
+            
             {!beatUrl ? (
-              <label className="text-[10px] text-[#5a5a72] cursor-pointer hover:text-white flex items-center gap-1">
-                <Upload size={12} /> Load Beat
-                <input type="file" accept="audio/*" className="hidden" onChange={handleBeatUpload} />
-              </label>
+              <div 
+                onClick={() => document.getElementById('beat-upload')?.click()}
+                className="border-[1.5px] border-dashed border-white/20 rounded-[18px] py-7 px-5 text-center cursor-pointer hover:border-purple/50 hover:bg-purple/10 transition-all"
+              >
+                <input id="beat-upload" type="file" accept="audio/*" className="hidden" onChange={handleBeatUpload} />
+                <div className="text-3xl mb-2.5 opacity-50 flex justify-center"><Music /></div>
+                <div className="text-[15px] font-bold text-white/60 mb-1">Drop beat or tap to load</div>
+                <div className="text-xs text-white/40 font-medium">Supports MP3, WAV, AAC</div>
+              </div>
             ) : (
-              <div className="absolute inset-0 flex items-center opacity-30 pointer-events-none px-1">
-                {waveform.map((h, i) => (
-                  <div
-                    key={i}
-                    className="bg-[#47d4ff] mx-[1px]"
-                    style={{
-                      height: `${h * 100}%`,
-                      width: (pixelsPerBeat / 4) - 2,
-                    }}
-                  />
-                ))}
+              <div className="relative z-10">
+                <div className="text-xs font-semibold text-purple/90 truncate mb-2">{beatName}</div>
+                <div className="flex items-end justify-between gap-2">
+                  <div className="text-[56px] font-black leading-none tracking-tighter">{bpm}</div>
+                  <div className="text-right">
+                    <div className="text-[10px] font-bold tracking-[0.2em] text-white/20 uppercase">BPM</div>
+                    <div className="text-[10px] text-purple/80 mt-0.5 font-medium">{bpmSource}</div>
+                  </div>
+                </div>
+                <canvas ref={canvasRef} className="w-full h-[50px] rounded-xl mt-3 bg-black/30" />
               </div>
             )}
-          </div>
 
-          {/* Takes Track */}
-          <div className="h-14 relative">
-            {takes.map((take) => (
-              <div
-                key={take.id}
-                className="absolute top-2 h-10 bg-[#ff4f6d22] border border-[#ff4f6d55] rounded-md flex items-center px-2 text-[10px] text-[#ff4f6d] cursor-pointer hover:bg-[#ff4f6d33] transition-colors"
-                style={{
-                  left: take.startBeat * pixelsPerBeat,
-                  width: take.durationBeats * pixelsPerBeat,
-                }}
-              >
-                <Mic size={12} className="mr-1" />
-                {take.name}
-              </div>
-            ))}
-          </div>
-
-          {/* PLAYHEAD */}
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-[#e8ff47] z-20 pointer-events-none opacity-50"
-            style={{ left: playheadBeat * pixelsPerBeat }}
-          />
-        </div>
-
-        {/* LYRICS GRID */}
-        <div className="flex-1 overflow-auto relative bg-[#060608] p-4">
-          <div className="relative" style={{ width: totalBeats * pixelsPerBeat, minHeight: '100%' }}>
-            {/* Grid Background */}
-            <div className="absolute inset-0 flex pointer-events-none">
-              {Array.from({ length: totalBeats }).map((_, i) => (
-                <div
-                  key={i}
+            <div className="grid grid-cols-16 gap-[3px] mt-3">
+              {Array.from({ length: 16 }).map((_, i) => (
+                <div 
+                  key={i} 
                   className={cn(
-                    "h-full border-r border-[#ffffff05]",
-                    i % beatsPerBar === 0 ? "border-r-[#ffffff11]" : ""
+                    "h-[7px] rounded-[3px] transition-all duration-75",
+                    i % 4 === 0 ? "bg-white/15" : "bg-white/10",
+                    gridPos === i && (isPlaying || isRecording || beatUrl) ? "bg-purple shadow-[0_0_8px_rgba(155,114,255,0.7)] scale-y-125" : ""
                   )}
-                  style={{ width: pixelsPerBeat, minWidth: pixelsPerBeat }}
                 />
               ))}
             </div>
 
-            {/* Lyrics Cells */}
-            <div className="relative z-10 flex flex-col gap-2">
-              {lyrics.map((line) => (
-                <div
-                  key={line.id}
-                  className={cn(
-                    "relative min-h-[40px] bg-[#111118] border rounded-md p-2 text-sm transition-colors cursor-text focus-within:border-[#e8ff47] focus-within:bg-[#1a1a24]",
-                    selectedLineId === line.id ? "border-[#e8ff47] shadow-[0_0_10px_#e8ff4722]" : "border-[#ffffff22] hover:border-[#ffffff44]"
-                  )}
-                  style={{
-                    marginLeft: line.startBeat * pixelsPerBeat,
-                    width: line.durationBeats * pixelsPerBeat,
-                  }}
-                  onClick={() => handleLineClick(line.id)}
-                >
-                  <input
-                    type="text"
-                    value={line.text}
-                    onChange={(e) => handleLineChange(line.id, e.target.value)}
-                    className="w-full bg-transparent outline-none text-[#f0f0f5] placeholder-[#5a5a72]"
-                    placeholder="Write a bar..."
-                  />
-                  {/* Syllable markers (mock) */}
-                  <div className="absolute -bottom-1.5 left-2 flex gap-1">
-                    {line.text.split(' ').map((word, i) => word && (
-                      <div key={i} className="h-1 w-1 rounded-full bg-[#47d4ff] opacity-50" title={word} />
-                    ))}
-                  </div>
+            <div className="flex gap-2 mt-3">
+              <button onClick={tapTempo} className="glass glass-hover flex-1 h-9 rounded-xl text-[11px] font-semibold tracking-wider flex items-center justify-center gap-1.5 text-white/50">
+                <Pointer size={12} /> Tap BPM
+              </button>
+              <button 
+                onClick={toggleMicBPM} 
+                className={cn("glass glass-hover flex-1 h-9 rounded-xl text-[11px] font-semibold tracking-wider flex items-center justify-center gap-1.5 transition-all", isMicOn ? "bg-purple/20 border-purple/50 text-purple" : "text-white/50")}
+              >
+                <Mic size={12} /> {isMicOn ? 'Stop' : 'Mic'}
+              </button>
+              <button 
+                onClick={toggleRec} 
+                className={cn("glass glass-hover flex-1 h-9 rounded-xl text-[11px] font-semibold tracking-wider flex items-center justify-center gap-1.5 transition-all", isRecording ? "bg-red-accent/20 border-red-accent/50 text-red-accent animate-pulse" : "text-white/50")}
+              >
+                <Circle size={10} fill={isRecording ? "currentColor" : "none"} /> {isRecording ? 'Stop' : 'Rec'}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* LYRICS EDITOR */}
+        <section>
+          <div className="text-[10px] font-bold tracking-[0.14em] text-white/40 uppercase px-1 mb-2.5">Lyrics</div>
+          <div className="glass rounded-[26px] overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between px-[18px] py-3.5 border-b border-white/10">
+              <div className="flex gap-3">
+                <div className="flex items-center gap-1.5 text-[11px] text-white/30">
+                  <strong className="text-white/80 font-semibold">{wordArr.length}</strong> <span>words</span>
                 </div>
-              ))}
+                <div className="flex items-center gap-1.5 text-[11px] text-white/30">
+                  <strong className="text-white/80 font-semibold">{totalSyl}</strong> <span>syl</span>
+                </div>
+              </div>
+              <div className={cn(
+                "px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all duration-300",
+                flowScore >= 85 ? "bg-hot/10 border-hot/30 text-hot" : 
+                flowScore >= 65 ? "bg-teal/10 border-teal/30 text-teal" : 
+                "bg-white/10 border-white/10 text-white/50"
+              )}>
+                Flow {flowScore} {flowScore >= 85 ? '🔥' : flowScore >= 70 ? '✨' : flowScore >= 50 ? '⚡' : ''}
+              </div>
+            </div>
+            
+            <div className="flex max-h-[320px]">
+              <div className="w-9 shrink-0 py-4 text-right text-[11px] leading-[1.65] text-white/15 select-none overflow-hidden font-mono">
+                {lines.map((_, i) => <div key={i} className="pr-2.5">{i + 1}</div>)}
+              </div>
+              <textarea 
+                value={lyrics}
+                onChange={(e) => setLyrics(e.target.value)}
+                placeholder="Start spittin'…&#10;&#10;Every bar a blueprint, every line a map —"
+                className="flex-1 py-4 px-3.5 bg-transparent border-none outline-none resize-none font-sans text-[15px] leading-[1.65] text-white caret-purple min-h-[220px] placeholder:text-white/15 placeholder:italic placeholder:font-light"
+              />
+              <div className="w-7 shrink-0 py-4 pr-1 text-[10px] leading-[1.65] text-right overflow-hidden border-l border-white/5 font-mono">
+                {lines.map((l, i) => {
+                  const s = sylLine(l);
+                  if (!l.trim()) return <div key={i} className="text-white/10">&nbsp;</div>;
+                  return (
+                    <div key={i} className={cn(s >= 12 ? "text-hot/70" : s >= 8 ? "text-teal/50" : "text-white/15")}>
+                      {s}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* STATS ROW */}
+        <div className="flex gap-2">
+          <div className="glass flex-1 rounded-[18px] p-3.5 flex flex-col gap-1 shadow-lg">
+            <div className="text-[9px] font-semibold tracking-[0.16em] text-white/25 uppercase">Scheme</div>
+            <div className="text-[22px] font-extrabold leading-none tracking-widest text-purple truncate" title={rhymeScheme}>
+              {rhymeScheme.length > 7 ? rhymeScheme.slice(0, 7) + '…' : rhymeScheme}
+            </div>
+          </div>
+          <div className="glass flex-1 rounded-[18px] p-3.5 flex flex-col gap-1 shadow-lg">
+            <div className="text-[9px] font-semibold tracking-[0.16em] text-white/25 uppercase">Flow Score</div>
+            <div className="text-[28px] font-extrabold leading-none tracking-tighter">{flowScore}</div>
+            <div className="h-[3px] rounded-full bg-white/10 overflow-hidden mt-1.5">
+              <div 
+                className="h-full rounded-full bg-gradient-to-r from-teal to-purple transition-all duration-500 ease-out" 
+                style={{ width: `${flowScore}%` }} 
+              />
+            </div>
+          </div>
+          <div className="glass flex-1 rounded-[18px] p-3.5 flex flex-col gap-1 shadow-lg">
+            <div className="text-[9px] font-semibold tracking-[0.16em] text-white/25 uppercase">Lines</div>
+            <div className="text-[28px] font-extrabold leading-none tracking-tighter">{lineCount}</div>
+          </div>
+        </div>
+
+        {/* RHYME SUGGESTIONS */}
+        <section>
+          <div className="text-[10px] font-bold tracking-[0.14em] text-white/40 uppercase px-1 mb-2.5">Rhyme Suggestions</div>
+          <div className="glass rounded-[26px] p-[18px] shadow-lg">
+            <div className="flex flex-wrap gap-[7px]">
+              {rhymeSuggestions.length > 0 ? (
+                rhymeSuggestions.map((w, i) => (
+                  <button 
+                    key={i} 
+                    onClick={() => insertRhyme(w)}
+                    className="px-3.5 py-1.5 rounded-full bg-white/10 border border-white/15 text-xs font-medium text-white/75 hover:bg-purple/20 hover:border-purple/50 hover:text-white transition-all active:scale-95"
+                  >
+                    {w}
+                  </button>
+                ))
+              ) : (
+                <div className="text-xs text-white/20 italic py-1 w-full text-center">Write a line to see rhymes…</div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* AI FLOW LINES */}
+        <section>
+          <div className="text-[10px] font-bold tracking-[0.14em] text-white/40 uppercase px-1 mb-2.5">AI Flow Lines</div>
+          <div className="glass rounded-[26px] p-[18px] relative overflow-hidden shadow-xl">
+            <div className="absolute inset-0 bg-gradient-to-br from-purple/10 to-transparent pointer-events-none" />
+            <div className="flex items-center justify-between mb-3 relative z-10">
+              <span className="text-[13px] font-bold">Suggestions</span>
+              <span className={cn(
+                "text-[10px] font-bold tracking-[0.12em] px-2.5 py-1 rounded-full uppercase border",
+                apiKey ? "bg-purple/20 border-purple/40 text-purple" : "bg-teal/15 border-teal/30 text-teal"
+              )}>
+                {apiKey ? 'Cloud' : 'Local'}
+              </span>
             </div>
 
-            {/* Add Line Button */}
-            <button
-              onClick={addLine}
-              className="mt-4 flex items-center gap-2 px-3 py-1.5 text-xs text-[#5a5a72] hover:text-white border border-[#ffffff22] rounded-md hover:bg-[#ffffff0a] transition-colors"
-            >
-              <Plus size={14} /> Add Bar
+            {isAiLoading && (
+              <div className="text-center text-[11px] font-bold tracking-[0.2em] text-purple uppercase py-3 animate-pulse">
+                Generating…
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1.5 min-h-[60px] relative z-10">
+              {aiSuggestions.length > 0 ? (
+                aiSuggestions.map((l, i) => (
+                  <button 
+                    key={i} 
+                    onClick={() => appendLine(l)}
+                    className="text-left px-3.5 py-2.5 rounded-[14px] bg-white/5 border border-white/10 text-[13px] text-white/70 hover:bg-purple/15 hover:border-purple/40 hover:text-white transition-all active:scale-[0.98] leading-snug"
+                  >
+                    {l}
+                  </button>
+                ))
+              ) : !isAiLoading && (
+                <div className="text-xs text-white/20 italic py-2 text-center">Auto-suggests as you write. Hit Generate for more.</div>
+              )}
+            </div>
+
+            <div className="flex gap-2 mt-3 relative z-10">
+              <button onClick={() => runAI(true)} className="glass glass-hover flex-1 h-10 rounded-[14px] text-xs font-bold tracking-wider flex items-center justify-center gap-1.5 text-white/60">
+                <Bolt size={14} /> Local
+              </button>
+              <button onClick={() => runAI(false)} className="glass glass-hover flex-1 h-10 rounded-[14px] text-xs font-bold tracking-wider flex items-center justify-center gap-1.5 text-white/60 hover:text-teal hover:border-teal/40 hover:bg-teal/10">
+                <Cloud size={14} /> Cloud AI
+              </button>
+              <button onClick={() => setShowApiKey(!showApiKey)} className="glass glass-hover w-10 h-10 rounded-[14px] flex items-center justify-center text-white/50">
+                <Key size={14} />
+              </button>
+            </div>
+
+            {showApiKey && (
+              <div className="mt-3 p-3 rounded-2xl bg-black/20 border border-white/10 flex flex-col gap-2 relative z-10 animate-in fade-in slide-in-from-top-2">
+                <input 
+                  type="password" 
+                  placeholder="Anthropic API key: sk-ant-…" 
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-black/30 border border-white/15 text-white text-sm outline-none focus:border-purple/50 transition-all"
+                />
+                <button 
+                  onClick={() => {
+                    setApiKey(apiKeyInput);
+                    localStorage.setItem('pmp5_key', apiKeyInput);
+                    setShowApiKey(false);
+                  }}
+                  className="h-10 rounded-xl bg-gradient-to-r from-purple to-indigo text-white text-sm font-bold hover:brightness-110 transition-all"
+                >
+                  Save Key
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* TAKES */}
+        <section>
+          <div className="text-[10px] font-bold tracking-[0.14em] text-white/40 uppercase px-1 mb-2.5">Takes</div>
+          <div className="glass rounded-[26px] p-[18px] shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[13px] font-bold">Recordings</span>
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-purple/20 border border-purple/30 text-purple">
+                {takes.length}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {takes.length > 0 ? (
+                takes.map((t, i) => (
+                  <div key={t.id} className="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/15 transition-all group">
+                    <div className="w-7 h-7 rounded-lg bg-purple/20 border border-purple/30 flex items-center justify-center text-xs font-black text-purple">
+                      {i + 1}
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <div className="text-[13px] font-bold truncate">{t.name}{t.q ? ' ⚡' : ''}</div>
+                      <div className="text-[10px] text-white/40 mt-0.5">{t.ts}{t.bpm ? ` · ${t.bpm} BPM` : ''}</div>
+                    </div>
+                    <button 
+                      onClick={() => t.url && new Audio(t.url).play()} 
+                      className="w-8 h-8 rounded-xl glass glass-hover flex items-center justify-center text-white/50 hover:text-purple hover:border-purple/40 hover:bg-purple/20"
+                    >
+                      <Play size={12} fill="currentColor" />
+                    </button>
+                    <button 
+                      onClick={() => setTakes(prev => prev.filter(x => x.id !== t.id))}
+                      className="w-8 h-8 rounded-xl glass glass-hover flex items-center justify-center text-white/50 hover:text-red-accent hover:border-red-accent/40 hover:bg-red-accent/20"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="text-xs text-white/20 italic py-4 text-center">No takes yet — hit Rec to start.</div>
+              )}
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* BOTTOM BAR */}
+      <div className="fixed bottom-0 left-0 w-full p-4 pb-7 bg-gradient-to-t from-bg via-bg/95 to-transparent pointer-events-none">
+        <div className="max-w-xl mx-auto pointer-events-auto">
+          <div className="grid grid-cols-4 gap-2 mb-2.5">
+            <button onClick={doExport} className="h-10 rounded-2xl bg-white/10 border border-white/15 text-white/60 text-[11px] font-bold tracking-wider flex items-center justify-center gap-1.5 hover:bg-white/20 hover:text-white transition-all">
+              <Download size={14} /> Export
             </button>
-
-            {/* PLAYHEAD */}
-            <div
-              className="absolute top-0 bottom-0 w-0.5 bg-[#e8ff47] z-20 pointer-events-none opacity-30"
-              style={{ left: playheadBeat * pixelsPerBeat }}
-            />
+            <label className="h-10 rounded-2xl bg-white/10 border border-white/15 text-white/60 text-[11px] font-bold tracking-wider flex items-center justify-center gap-1.5 hover:bg-white/20 hover:text-white transition-all cursor-pointer">
+              <Upload size={14} /> Load
+              <input type="file" accept=".json" className="hidden" onChange={doLoad} />
+            </label>
+            <button onClick={tapTempo} className="h-10 rounded-2xl bg-white/10 border border-white/15 text-white/60 text-[11px] font-bold tracking-wider flex items-center justify-center gap-1.5 hover:bg-white/20 hover:text-white transition-all">
+              <Pointer size={14} /> Tap
+            </button>
+            <button onClick={clearAll} className="h-10 rounded-2xl bg-white/10 border border-red-accent/25 text-white/60 text-[11px] font-bold tracking-wider flex items-center justify-center gap-1.5 hover:bg-red-accent/20 hover:border-red-accent/40 hover:text-red-accent transition-all">
+              <Trash2 size={14} /> Clear
+            </button>
           </div>
-        </div>
-      </div>
-
-      {/* BOTTOM PANEL */}
-      <div className="h-48 bg-[#111118] border-t border-[#ffffff0f] flex shrink-0">
-        {/* Tools */}
-        <div className="w-64 border-r border-[#ffffff0f] p-4 flex flex-col gap-2 overflow-y-auto">
-          <div className="text-[9px] text-[#5a5a72] tracking-widest uppercase mb-2">AI Tools</div>
-          <button
-            onClick={() => generateAI('flow')}
-            disabled={!selectedLineId || isAiLoading}
-            className="flex items-center gap-2 px-3 py-2 bg-[#17171f] border border-[#ffffff0f] rounded-md text-xs hover:bg-[#ffffff0a] hover:border-[#e8ff4755] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+          <button 
+            onClick={toggleRec}
+            className={cn(
+              "w-full h-[52px] rounded-[18px] flex items-center justify-center gap-2.5 text-[15px] font-black tracking-widest uppercase transition-all duration-300 shadow-2xl",
+              isRecording 
+                ? "bg-gradient-to-r from-red-accent to-[#cc2244] text-white shadow-[0_0_40px_rgba(255,79,109,0.8)]" 
+                : "bg-gradient-to-r from-purple via-indigo to-indigo text-white shadow-[0_0_28px_rgba(147,112,219,0.55)] hover:shadow-[0_0_40px_rgba(147,112,219,0.8)] hover:-translate-y-0.5 active:translate-y-0 active:scale-95"
+            )}
           >
-            <Wand2 size={14} className="text-[#e8ff47]" />
-            Match Flow
+            {isRecording ? <Square size={18} fill="currentColor" /> : <Zap size={18} fill="currentColor" />}
+            <span>{isRecording ? 'Stop Recording' : 'Record Take'}</span>
           </button>
-          <button
-            onClick={() => generateAI('rewrite')}
-            disabled={!selectedLineId || isAiLoading}
-            className="flex items-center gap-2 px-3 py-2 bg-[#17171f] border border-[#ffffff0f] rounded-md text-xs hover:bg-[#ffffff0a] hover:border-[#47d4ff55] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
-          >
-            <Wand2 size={14} className="text-[#47d4ff]" />
-            Rewrite Line
-          </button>
-          <button
-            onClick={() => generateAI('rhyme')}
-            disabled={!selectedLineId || isAiLoading}
-            className="flex items-center gap-2 px-3 py-2 bg-[#17171f] border border-[#ffffff0f] rounded-md text-xs hover:bg-[#ffffff0a] hover:border-[#b47fff55] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
-          >
-            <Wand2 size={14} className="text-[#b47fff]" />
-            Rhyme Alternatives
-          </button>
-          <div className="text-[9px] text-[#5a5a72] tracking-widest uppercase mt-2 mb-2">Edit Tools</div>
-          <button
-            onClick={quantizeLine}
-            disabled={!selectedLineId}
-            className="flex items-center gap-2 px-3 py-2 bg-[#17171f] border border-[#ffffff0f] rounded-md text-xs hover:bg-[#ffffff0a] hover:border-[#ffffff55] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
-          >
-            <AlignLeft size={14} className="text-[#f0f0f5]" />
-            Quantize (1/16)
-          </button>
-          <button
-            onClick={alignVocals}
-            disabled={!selectedLineId}
-            className="flex items-center gap-2 px-3 py-2 bg-[#17171f] border border-[#ffffff0f] rounded-md text-xs hover:bg-[#ffffff0a] hover:border-[#ffffff55] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
-          >
-            <RefreshCw size={14} className="text-[#f0f0f5]" />
-            Align Vocals
-          </button>
-        </div>
-
-        {/* AI Context Panel */}
-        <div className="flex-1 p-4 flex flex-col relative overflow-hidden">
-          <div className="text-[9px] text-[#5a5a72] tracking-widest uppercase mb-2 flex justify-between items-center">
-            <span>Contextual AI</span>
-            {isAiLoading && <span className="text-[#e8ff47] animate-pulse">Thinking...</span>}
-          </div>
-          <div className="flex-1 overflow-y-auto bg-[#060608] border border-[#ffffff0f] rounded-md p-3 text-xs text-[#a0a0b0] whitespace-pre-wrap font-mono leading-relaxed">
-            {aiPanelContent}
-          </div>
         </div>
       </div>
     </div>
