@@ -165,6 +165,12 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
 
+  // AI Persona Settings
+  const [aiCreativity, setAiCreativity] = useState(70);
+  const [aiComplexity, setAiComplexity] = useState(50);
+  const [aiMood, setAiMood] = useState<'hype' | 'melancholic' | 'aggressive' | 'conscious' | 'chill'>('hype');
+  const [showAiSettings, setShowAiSettings] = useState(false);
+
   // Refs
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -186,6 +192,9 @@ export default function App() {
     if (d.beatName) setBeatName(d.beatName);
     if (d.bpmSource) setBpmSource(d.bpmSource);
     if (d.takes) setTakes(d.takes.map((t: any) => ({ ...t, url: '' })));
+    if (d.aiCreativity) setAiCreativity(d.aiCreativity);
+    if (d.aiComplexity) setAiComplexity(d.aiComplexity);
+    if (d.aiMood) setAiMood(d.aiMood);
     setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   }, []);
 
@@ -202,7 +211,10 @@ export default function App() {
           bpm,
           beatName,
           bpmSource,
-          takes: takes.map(t => ({ name: t.name, ts: t.ts, q: t.q, bpm: t.bpm }))
+          takes: takes.map(t => ({ name: t.name, ts: t.ts, q: t.q, bpm: t.bpm })),
+          aiCreativity,
+          aiComplexity,
+          aiMood
         }));
         setSaveStatus('saved');
         setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
@@ -212,7 +224,7 @@ export default function App() {
       }
     }, 1500); // 1.5s debounce
     return () => clearTimeout(timer);
-  }, [lyrics, bpm, takes, beatName, bpmSource]);
+  }, [lyrics, bpm, takes, beatName, bpmSource, aiCreativity, aiComplexity, aiMood]);
 
   // Metrics Calculation
   const lines = lyrics.split('\n');
@@ -469,18 +481,27 @@ export default function App() {
     // Cloud AI (Anthropic)
     try {
       const lastLines = nonEmptyLines.slice(-4).join('\n');
+      const systemPrompt = `You are a world-class rap ghostwriter. 
+      Persona Settings:
+      - Creativity: ${aiCreativity}/100 (Higher means more abstract metaphors and wordplay)
+      - Complexity: ${aiComplexity}/100 (Higher means multi-syllabic internal rhymes and intricate flow patterns)
+      - Mood: ${aiMood} (Adjust tone and vocabulary accordingly)
+      
+      Write 5 new bar suggestions that match the flow, syllable density, and rhyme scheme of the given bars. 
+      Return ONLY a JSON array of 5 strings.`;
+
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
-          "dangerouslyAllowBrowser": "true" // Note: This is for demo purposes in this environment
+          "dangerouslyAllowBrowser": "true"
         },
         body: JSON.stringify({
           model: "claude-3-sonnet-20240229",
           max_tokens: 600,
-          system: "You are a world-class rap ghostwriter. Write 5 new bar suggestions that match the flow, syllable density, and rhyme scheme of the given bars. Return ONLY a JSON array of 5 strings.",
+          system: systemPrompt,
           messages: [{ role: "user", content: `Last bars:\n${lastLines}\n\nWrite 5 continuation bars.` }]
         })
       });
@@ -764,7 +785,18 @@ export default function App() {
           <div className="glass rounded-[26px] p-4 sm:p-[18px] relative overflow-hidden shadow-xl">
             <div className="absolute inset-0 bg-gradient-to-br from-purple/10 to-transparent pointer-events-none" />
             <div className="flex items-center justify-between mb-4 relative z-10">
-              <span className="text-[14px] font-bold">Suggestions</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[14px] font-bold">Suggestions</span>
+                <button 
+                  onClick={() => setShowAiSettings(!showAiSettings)}
+                  className={cn(
+                    "p-1.5 rounded-lg transition-all",
+                    showAiSettings ? "bg-purple/20 text-purple" : "text-white/30 hover:text-white/60"
+                  )}
+                >
+                  <Settings size={14} />
+                </button>
+              </div>
               <span className={cn(
                 "text-[10px] font-bold tracking-[0.12em] px-3 py-1 rounded-full uppercase border",
                 apiKey ? "bg-purple/20 border-purple/40 text-purple" : "bg-teal/15 border-teal/30 text-teal"
@@ -772,6 +804,54 @@ export default function App() {
                 {apiKey ? 'Cloud' : 'Local'}
               </span>
             </div>
+
+            {showAiSettings && (
+              <div className="mb-6 p-4 rounded-2xl bg-black/20 border border-white/10 flex flex-col gap-4 relative z-10 animate-in fade-in slide-in-from-top-2">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] font-bold tracking-wider text-white/40 uppercase">Creativity</label>
+                    <span className="text-[10px] font-mono text-purple">{aiCreativity}%</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="100" value={aiCreativity} 
+                    onChange={(e) => setAiCreativity(parseInt(e.target.value))}
+                    className="w-full accent-purple h-1 bg-white/10 rounded-full appearance-none cursor-pointer"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] font-bold tracking-wider text-white/40 uppercase">Complexity</label>
+                    <span className="text-[10px] font-mono text-teal">{aiComplexity}%</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="100" value={aiComplexity} 
+                    onChange={(e) => setAiComplexity(parseInt(e.target.value))}
+                    className="w-full accent-teal h-1 bg-white/10 rounded-full appearance-none cursor-pointer"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-[10px] font-bold tracking-wider text-white/40 uppercase">Mood</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['hype', 'melancholic', 'aggressive', 'conscious', 'chill'] as const).map(m => (
+                      <button 
+                        key={m}
+                        onClick={() => setAiMood(m)}
+                        className={cn(
+                          "px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border",
+                          aiMood === m 
+                            ? "bg-purple/20 border-purple/40 text-purple" 
+                            : "bg-white/5 border-white/5 text-white/30 hover:text-white/60"
+                        )}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {isAiLoading && (
               <div className="text-center text-[11px] font-bold tracking-[0.2em] text-purple uppercase py-4 animate-pulse">
