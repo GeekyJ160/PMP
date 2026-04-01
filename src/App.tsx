@@ -42,18 +42,45 @@ const RD: Record<string, string[]> = {
   op: ['drop', 'stop', 'top', 'shop', 'nonstop', 'rooftop'],
 };
 
-const LOCAL_BANK = [
-  "ride the wave until the city fades to smoke",
-  "every lesson learned was just a different kind of broke",
-  "build the empire stone by stone in dead of night",
-  "they said I'd never make it now I'm burning bright",
-  "the pen's a weapon and the page is where I fight",
-  "move through darkness like a ghost and own the light",
-  "count the miles between the dream and where I stand",
-  "carve my name into the stone with my own hand",
-  "nothing given freely everything was earned through pain",
-  "even when the floods came I still danced in rain",
-];
+const MOOD_BANKS: Record<string, string[]> = {
+  hype: [
+    "ride the wave until the city fades to smoke",
+    "every lesson learned was just a different kind of broke",
+    "they said I'd never make it now I'm burning bright",
+    "stadium lights reflecting in the chrome of the whip",
+    "we started from the basement now we're top of the ship"
+  ],
+  melancholic: [
+    "raindrops on the window tracing paths of the past",
+    "built a castle in the sand but the tide moved too fast",
+    "ghosts in the hallway whispering names I forgot",
+    "searching for a silver lining in a world that is not",
+    "the ink is running dry but the pain is still wet"
+  ],
+  aggressive: [
+    "the pen's a weapon and the page is where I fight",
+    "build the empire stone by stone in dead of night",
+    "shattering the glass ceiling with a heavy-weight flow",
+    "no mercy for the weak when the pressure starts to grow",
+    "I'm a titan in the arena, watch the coliseum glow"
+  ],
+  conscious: [
+    "reading between the lines of the headlines they sell",
+    "escaping from the mental bars of a digital cell",
+    "planting seeds of wisdom in a concrete terrain",
+    "the revolution's quiet but it's washing out the stain",
+    "knowledge is the currency that never loses value"
+  ],
+  chill: [
+    "sunset gold dripping over low-fidelity beats",
+    "cruising through the memories of these quiet city streets",
+    "breathing in the rhythm of the universe's heart",
+    "every ending is just waiting for a brand new start",
+    "floating on a cloud of thoughts, drifting far apart"
+  ]
+};
+
+const LOCAL_BANK = Object.values(MOOD_BANKS).flat();
 
 // ─── TYPES ───────────────────────────────────────────────────────
 
@@ -123,7 +150,50 @@ function getRhymeScheme(lines: string[]) {
   return s || '—';
 }
 
-function getSugs(word: string) {
+function getRhymeQuality(scheme: string) {
+  if (scheme === '—' || scheme.length < 2) return 0;
+  const counts: Record<string, number> = {};
+  for (const char of scheme) {
+    counts[char] = (counts[char] || 0) + 1;
+  }
+  const rhymed = Object.values(counts).filter(c => c > 1).reduce((a, b) => a + b, 0);
+  return Math.round((rhymed / scheme.length) * 100);
+}
+
+function getCadenceScore(lines: string[]) {
+  if (lines.length < 2) return 100;
+  const syls = lines.map(l => sylLine(l));
+  const avg = syls.reduce((a, b) => a + b, 0) / syls.length;
+  const variance = syls.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / syls.length;
+  const stdDev = Math.sqrt(variance);
+  // Lower stdDev means more consistent cadence. 0 stdDev = 100 score.
+  return Math.max(0, Math.min(100, Math.round(100 - (stdDev * 10))));
+}
+
+function getEmotionalTone(text: string) {
+  const t = text.toLowerCase();
+  const moods = {
+    hype: ['fire', 'lit', 'top', 'king', 'win', 'gold', 'bright', 'light', 'sky', 'high', 'power', 'strong'],
+    aggressive: ['fight', 'war', 'blood', 'kill', 'dead', 'smoke', 'broke', 'pain', 'hard', 'cold', 'dark', 'storm'],
+    melancholic: ['rain', 'ghost', 'lost', 'past', 'fast', 'tear', 'fear', 'gone', 'lone', 'sad', 'blue', 'grey'],
+    conscious: ['truth', 'mind', 'soul', 'life', 'world', 'learn', 'wise', 'deep', 'real', 'know', 'think', 'see'],
+    chill: ['wave', 'flow', 'slow', 'dream', 'cloud', 'drift', 'vibe', 'cool', 'calm', 'smooth', 'easy', 'rest']
+  };
+  
+  const scores: Record<string, number> = { hype: 0, aggressive: 0, melancholic: 0, conscious: 0, chill: 0 };
+  const words = t.match(/\b\w+\b/g) || [];
+  
+  for (const w of words) {
+    for (const [mood, keywords] of Object.entries(moods)) {
+      if (keywords.includes(w)) scores[mood]++;
+    }
+  }
+  
+  const max = Object.entries(scores).reduce((a, b) => b[1] > a[1] ? b : a);
+  return max[1] > 0 ? max[0] : 'neutral';
+}
+
+function getSugs(word: string, targetSyllables: number = 0, tone: string = 'neutral') {
   if (!word) return [];
   const w = word.replace(/[^a-z]/g, '');
   let out: string[] = [];
@@ -139,7 +209,40 @@ function getSugs(word: string) {
       out.push(...RD[k].filter(x => x.endsWith(t)));
     }
   }
-  return [...new Set(out)].filter(x => x !== w).slice(0, 16);
+  
+  let filtered = [...new Set(out)].filter(x => x !== w);
+  
+  // Context-aware scoring
+  const moods: Record<string, string[]> = {
+    hype: ['fire', 'lit', 'top', 'king', 'win', 'gold', 'bright', 'light', 'sky', 'high', 'power', 'strong'],
+    aggressive: ['fight', 'war', 'blood', 'kill', 'dead', 'smoke', 'broke', 'pain', 'hard', 'cold', 'dark', 'storm'],
+    melancholic: ['rain', 'ghost', 'lost', 'past', 'fast', 'tear', 'fear', 'gone', 'lone', 'sad', 'blue', 'grey'],
+    conscious: ['truth', 'mind', 'soul', 'life', 'world', 'learn', 'wise', 'deep', 'real', 'know', 'think', 'see'],
+    chill: ['wave', 'flow', 'slow', 'dream', 'cloud', 'drift', 'vibe', 'cool', 'calm', 'smooth', 'easy', 'rest']
+  };
+
+  const toneWords = moods[tone] || [];
+
+  filtered.sort((a, b) => {
+    let scoreA = 0;
+    let scoreB = 0;
+    
+    // Syllable matching (prefer similar syllable counts for flow)
+    const sylA = sylWord(a);
+    const sylB = sylWord(b);
+    if (targetSyllables > 0) {
+      scoreA -= Math.abs(sylA - targetSyllables) * 2;
+      scoreB -= Math.abs(sylB - targetSyllables) * 2;
+    }
+    
+    // Tone matching
+    if (toneWords.includes(a)) scoreA += 5;
+    if (toneWords.includes(b)) scoreB += 5;
+    
+    return scoreB - scoreA;
+  });
+
+  return filtered.slice(0, 16);
 }
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────
@@ -170,6 +273,15 @@ export default function App() {
   const [aiComplexity, setAiComplexity] = useState(50);
   const [aiMood, setAiMood] = useState<'hype' | 'melancholic' | 'aggressive' | 'conscious' | 'chill'>('hype');
   const [showAiSettings, setShowAiSettings] = useState(false);
+
+  const getPersonaName = () => {
+    if (aiMood === 'aggressive') return aiComplexity > 60 ? 'The Warlord' : 'The Enforcer';
+    if (aiMood === 'melancholic') return aiCreativity > 60 ? 'The Ghost' : 'The Loner';
+    if (aiMood === 'hype') return aiCreativity > 60 ? 'The Visionary' : 'The Hype Man';
+    if (aiMood === 'conscious') return aiComplexity > 60 ? 'The Sage' : 'The Prophet';
+    if (aiMood === 'chill') return aiCreativity > 60 ? 'The Dreamer' : 'The Drifter';
+    return 'The Ghostwriter';
+  };
 
   // Refs
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -236,6 +348,9 @@ export default function App() {
   const avgSyl = totalSyl / Math.max(1, lineCount);
   const flowScore = Math.round(Math.max(0, Math.min(100, 50 + density * 6 + avgSyl * 2 - Math.abs(avgSyl - 12) * 2)));
   const rhymeScheme = lineCount > 1 ? getRhymeScheme(nonEmptyLines) : '—';
+  const rhymeQuality = getRhymeQuality(rhymeScheme);
+  const cadenceScore = getCadenceScore(nonEmptyLines);
+  const emotionalTone = getEmotionalTone(lyrics);
 
   // AI Suggestions (Local)
   useEffect(() => {
@@ -243,16 +358,21 @@ export default function App() {
     if (lastLine.trim()) {
       const seed = lastLine.trim();
       const h = seed.split('').reduce((a, c) => a + c.charCodeAt(0), 37);
-      const suggestions = [0, 1, 2, 3].map(i => LOCAL_BANK[(h + i * 5) % LOCAL_BANK.length]);
-      setAiSuggestions(suggestions);
+      
+      // Filter local bank by mood
+      const currentBank = MOOD_BANKS[aiMood] || LOCAL_BANK;
+      const suggestions = [0, 1, 2, 3].map(i => currentBank[(h + i * 5) % currentBank.length]);
+      
+      if (!apiKey) setAiSuggestions(suggestions);
 
       const lastWord = getLastWord(seed);
-      setRhymeSuggestions(getSugs(lastWord));
+      const targetSyl = sylLine(seed);
+      setRhymeSuggestions(getSugs(lastWord, targetSyl, emotionalTone));
     } else {
       setAiSuggestions([]);
       setRhymeSuggestions([]);
     }
-  }, [lyrics]);
+  }, [lyrics, apiKey, aiMood]);
 
   // Grid Logic
   const startGrid = useCallback(() => {
@@ -754,6 +874,18 @@ export default function App() {
               <div className="text-[9px] font-bold tracking-[0.16em] text-white/25 uppercase">Lines</div>
               <div className="text-2xl sm:text-[28px] font-extrabold leading-none tracking-tighter">{lineCount}</div>
             </div>
+            <div className="glass rounded-[22px] p-4 flex flex-col gap-1.5 shadow-lg col-span-2 sm:col-span-1">
+              <div className="text-[9px] font-bold tracking-[0.16em] text-white/25 uppercase">Rhyme Quality</div>
+              <div className="text-2xl sm:text-[28px] font-extrabold leading-none tracking-tighter text-purple">{rhymeQuality}%</div>
+            </div>
+            <div className="glass rounded-[22px] p-4 flex flex-col gap-1.5 shadow-lg col-span-2 sm:col-span-1">
+              <div className="text-[9px] font-bold tracking-[0.16em] text-white/25 uppercase">Cadence</div>
+              <div className="text-2xl sm:text-[28px] font-extrabold leading-none tracking-tighter text-teal">{cadenceScore}%</div>
+            </div>
+            <div className="glass rounded-[22px] p-4 flex flex-col gap-1.5 shadow-lg col-span-2 sm:col-span-1">
+              <div className="text-[9px] font-bold tracking-[0.16em] text-white/25 uppercase">Tone</div>
+              <div className="text-2xl sm:text-[28px] font-extrabold leading-none tracking-tighter capitalize text-white/80">{emotionalTone}</div>
+            </div>
           </div>
         </section>
 
@@ -785,20 +917,25 @@ export default function App() {
           <div className="glass rounded-[26px] p-4 sm:p-[18px] relative overflow-hidden shadow-xl">
             <div className="absolute inset-0 bg-gradient-to-br from-purple/10 to-transparent pointer-events-none" />
             <div className="flex items-center justify-between mb-4 relative z-10">
-              <div className="flex items-center gap-2">
-                <span className="text-[14px] font-bold">Suggestions</span>
-                <button 
-                  onClick={() => setShowAiSettings(!showAiSettings)}
-                  className={cn(
-                    "p-1.5 rounded-lg transition-all",
-                    showAiSettings ? "bg-purple/20 text-purple" : "text-white/30 hover:text-white/60"
-                  )}
-                >
-                  <Settings size={14} />
-                </button>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] font-bold">Suggestions</span>
+                  <button 
+                    onClick={() => setShowAiSettings(!showAiSettings)}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all",
+                      showAiSettings ? "bg-purple/20 text-purple" : "text-white/30 hover:text-white/60"
+                    )}
+                  >
+                    <Settings size={14} />
+                  </button>
+                </div>
+                <div className="text-[10px] text-white/30 font-medium tracking-wide mt-0.5 italic">
+                  Persona: {getPersonaName()}
+                </div>
               </div>
               <span className={cn(
-                "text-[10px] font-bold tracking-[0.12em] px-3 py-1 rounded-full uppercase border",
+                "text-[10px] font-bold tracking-[0.12em] px-3 py-1 rounded-full uppercase border h-fit",
                 apiKey ? "bg-purple/20 border-purple/40 text-purple" : "bg-teal/15 border-teal/30 text-teal"
               )}>
                 {apiKey ? 'Cloud' : 'Local'}
