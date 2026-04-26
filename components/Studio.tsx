@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { UserState, LyricSuggestion, InstrumentalData, AppScreen, Genre, SongProject, GENRE_PERSONAS } from '../types';
-import { getLyricSuggestions, getRhymeSuggestions, analyzeInstrumental } from '../services/gemini';
+import { getLyricSuggestions, getRhymeSuggestions, analyzeInstrumental, getPunchlineSuggestion } from '../services/gemini';
 import SuggestionCard from './SuggestionCard';
 import BeatVisualizer from './BeatVisualizer';
 
@@ -35,6 +35,15 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
   const [collaborators, setCollaborators] = useState<string[]>([]);
   const [isRemoteUpdate, setIsRemoteUpdate] = useState(false);
   const [takes, setTakes] = useState<{id: number, url: string, name: string}[]>([]);
+  const [punchline, setPunchline] = useState<string | null>(null);
+  const [punchlineLoading, setPunchlineLoading] = useState(false);
+  
+  // Auto-Rhyme State
+  const [autoRhymes, setAutoRhymes] = useState<string[]>([]);
+  const [showAutoRhymes, setShowAutoRhymes] = useState(false);
+  const [cursorCoords, setCursorCoords] = useState<{x: number, y: number} | null>(null);
+  const rhymeCache = useRef<Record<string, string[]>>({});
+  const currentAutoRhymeWordRef = useRef<string | null>(null);
   
   // Recording State
   const [isRecordingPerformance, setIsRecordingPerformance] = useState(false);
@@ -120,6 +129,83 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     setIsRemoteUpdate(false);
   }, [lyrics, socket, currentProjectId]);
 
+  const getCaretCoordinates = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    const range = selection.getRangeAt(0).cloneRange();
+    range.collapse(false);
+    let rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+      const span = document.createElement('span');
+      span.appendChild(document.createTextNode('\u200b'));
+      range.insertNode(span);
+      rect = span.getBoundingClientRect();
+      span.parentNode?.removeChild(span);
+    }
+    return { x: rect.left, y: rect.bottom };
+  };
+
+  const getPreviousLineLastWord = () => {
+    const selection = window.getSelection();
+    if (!selection || !textareaRef.current) return null;
+    if (!textareaRef.current.contains(selection.focusNode)) return null;
+    
+    const preCaretRange = selection.getRangeAt(0).cloneRange();
+    preCaretRange.selectNodeContents(textareaRef.current);
+    preCaretRange.setEnd(selection.focusNode!, selection.focusOffset);
+    
+    const tempDiv = document.createElement('div');
+    tempDiv.appendChild(preCaretRange.cloneContents());
+    
+    let html = tempDiv.innerHTML;
+    html = html.replace(/<br\s*[\/]?>/gi, '\n');
+    html = html.replace(/<\/div>/gi, '\n');
+    html = html.replace(/<[^>]+>/g, ''); 
+    
+    const rawLines = html.split('\n');
+    if (rawLines.length < 2) return null;
+    
+    let prevLine = '';
+    for (let i = rawLines.length - 2; i >= 0; i--) {
+      if (rawLines[i].trim().length > 0) {
+        prevLine = rawLines[i].trim();
+        break;
+      }
+    }
+    
+    if (!prevLine) return null;
+    
+    const words = prevLine.split(/\s+/);
+    const lastWord = words[words.length - 1].replace(/[^a-zA-Z]/g, '');
+    
+    return lastWord.length > 1 ? lastWord : null;
+  };
+
+  const insertAutoRhyme = (rhyme: string) => {
+    if (!textareaRef.current) return;
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const textNode = selection.focusNode;
+      if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+        const text = textNode.nodeValue || '';
+        const offset = selection.focusOffset;
+        const match = text.slice(0, offset).match(/([a-zA-Z]+)$/);
+        if (match) {
+          range.setStart(textNode, offset - match[1].length);
+        }
+      }
+      range.deleteContents();
+      range.insertNode(document.createTextNode(rhyme + ' '));
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      
+      setLyrics(textareaRef.current.innerHTML);
+    }
+    setShowAutoRhymes(false);
+  };
+
   const handleSelection = () => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
@@ -128,9 +214,38 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     if (text && !text.includes(' ') && !text.includes('\n')) {
       setSelectedWord({ text, start: 0, end: 0 });
       setSavedRange(selection.getRangeAt(0).cloneRange());
+      setShowAutoRhymes(false);
     } else {
       setSelectedWord(null);
       setSavedRange(null);
+      
+      // Auto Rhyme Assist
+      const coords = getCaretCoordinates();
+      if (coords) setCursorCoords(coords);
+      
+      const prevWord = getPreviousLineLastWord();
+      if (prevWord) {
+        if (prevWord !== currentAutoRhymeWordRef.current) {
+          currentAutoRhymeWordRef.current = prevWord;
+          if (rhymeCache.current[prevWord]) {
+            setAutoRhymes(rhymeCache.current[prevWord]);
+            setShowAutoRhymes(true);
+          } else {
+            getRhymeSuggestions(prevWord, userState.genre, lyrics.substring(0, 200), userState.instrumental?.bpm).then(res => {
+              rhymeCache.current[prevWord] = res;
+              if (currentAutoRhymeWordRef.current === prevWord) {
+                setAutoRhymes(res);
+                setShowAutoRhymes(true);
+              }
+            });
+          }
+        } else {
+          setShowAutoRhymes(true);
+        }
+      } else {
+        setShowAutoRhymes(false);
+        currentAutoRhymeWordRef.current = null;
+      }
     }
   };
 
@@ -233,6 +348,22 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
     setSuggestions(res);
     setLoading(false);
   }, [lyrics, userState]);
+
+  const handleGeneratePunchline = async () => {
+    const plainText = lyrics.replace(/<[^>]*>?/gm, '');
+    if (!plainText.trim()) return;
+    
+    setPunchlineLoading(true);
+    try {
+      const res = await getPunchlineSuggestion(plainText, userState.genre, userState.subPersona);
+      setPunchline(res);
+      setTimeout(() => setPunchline(null), 8000);
+    } catch (err) {
+      console.error("Punchline error:", err);
+    } finally {
+      setPunchlineLoading(false);
+    }
+  };
 
   const fetchRhymes = useCallback(async () => {
     if (!selectedWord) return;
@@ -449,9 +580,39 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#0A0A1A] overflow-hidden">
+      {showAutoRhymes && cursorCoords && autoRhymes.length > 0 && (
+        <div 
+          className="fixed z-50 bg-[#1E1E38]/95 backdrop-blur-xl border border-purple-500/40 rounded-2xl shadow-2xl p-3 flex flex-col gap-2 max-w-sm animate-in fade-in zoom-in duration-200"
+          style={{ 
+            top: cursorCoords.y + 10, 
+            left: Math.min(cursorCoords.x, window.innerWidth - 350) 
+          }}
+        >
+          <div className="flex items-center justify-between border-b border-white/10 pb-2">
+            <div className="flex items-center gap-2">
+              <span className="material-icons-round text-purple-400 text-sm">auto_fix_high</span>
+              <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">Rhyme Assist: <span className="text-purple-400">{currentAutoRhymeWordRef.current}</span></span>
+            </div>
+            <button onClick={() => setShowAutoRhymes(false)} className="text-gray-500 hover:text-white transition-colors">
+              <span className="material-icons-round text-[12px]">close</span>
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {autoRhymes.slice(0, 10).map((rhyme, idx) => (
+              <button
+                key={idx}
+                onClick={() => insertAutoRhyme(rhyme)}
+                className="px-2.5 py-1.5 bg-white/5 hover:bg-purple-500/40 text-xs font-bold text-gray-200 rounded-lg transition-all active:scale-95 border border-white/5 hover:border-purple-500/50"
+              >
+                {rhyme}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <audio 
         ref={audioRef} 
-        src={userState.instrumental?.url} 
+        src={userState.instrumental?.url || undefined} 
         loop={!isRecordingPerformance}
         onEnded={() => {
           if (isRecordingPerformance) stopRecordingPerformance();
@@ -465,13 +626,6 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
           // Performance ended, but instrumental might still be playing
         }}
       />
-      <input 
-        ref={fileInputRef} 
-        type="file" 
-        accept="audio/*,.mp3,.wav,.m4a,.ogg" 
-        onChange={handleFileUpload} 
-        className="hidden" 
-      />
 
       <aside className="w-72 bg-[#121226]/50 border-r border-white/5 p-6 flex flex-col gap-6">
         <h1 className="font-black text-xl tracking-tighter metallic-text font-['Orbitron']">PMP STUDIO</h1>
@@ -481,31 +635,50 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
             <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Beat Lab</label>
             {isAnalyzing && <span className="w-2 h-2 rounded-full bg-purple-500 animate-ping"></span>}
           </div>
-          <div 
-            onClick={() => !isAnalyzing && fileInputRef.current?.click()} 
-            className={`cursor-pointer border-2 border-dashed p-6 rounded-[2.5rem] transition-all text-center group relative overflow-hidden ${isAnalyzing ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/10 hover:bg-white/5'}`}
+          <label 
+            htmlFor="studio-beat-up"
+            className={`block cursor-pointer border-2 border-dashed p-8 rounded-[2.5rem] transition-all text-center group relative overflow-hidden ${isAnalyzing ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5'}`}
           >
+            <input 
+              ref={fileInputRef}
+              id="studio-beat-up"
+              type="file" 
+              accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac" 
+              onChange={handleFileUpload} 
+              className="hidden" 
+              disabled={isAnalyzing}
+            />
             {isAnalyzing ? (
-              <div className="py-4 flex flex-col items-center gap-2">
-                <span className="material-icons-round animate-spin text-purple-500 text-3xl">sync</span>
-                <p className="text-[9px] font-black uppercase text-purple-400 tracking-tighter">Harmonic Analysis...</p>
+              <div className="py-6 flex flex-col items-center gap-3">
+                <span className="material-icons-round animate-spin text-purple-500 text-4xl">sync</span>
+                <p className="text-[10px] font-black uppercase text-purple-400 tracking-widest animate-pulse">Harmonic Analysis...</p>
               </div>
             ) : userState.instrumental ? (
-              <div>
+              <div className="space-y-3">
                 <BeatVisualizer active={playbackActive} />
-                <p className="text-[10px] font-bold mt-2 truncate text-purple-200 px-2">{userState.instrumental.name}</p>
-                <div className="flex justify-between mt-2 px-2 text-[10px] font-black text-green-400 uppercase">
-                  <span>{userState.instrumental.bpm || '--'} BPM</span>
-                  <span>{userState.instrumental.key}</span>
+                <div className="px-2">
+                  <p className="text-[11px] font-black truncate text-purple-200 mb-1">{userState.instrumental.name}</p>
+                  <div className="flex justify-between items-center text-[10px] font-black text-green-400 uppercase tracking-widest">
+                    <span className="flex items-center gap-1"><span className="material-icons-round text-[12px]">speed</span> {userState.instrumental.bpm || '--'} BPM</span>
+                    <span className="flex items-center gap-1"><span className="material-icons-round text-[12px]">music_note</span> {userState.instrumental.key}</span>
+                  </div>
+                </div>
+                <div className="mt-4 pt-4 border-t border-white/5">
+                   <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest group-hover:text-purple-400 transition-colors">Change Beat</div>
                 </div>
               </div>
             ) : (
-              <div className="py-4">
-                <span className="material-icons-round text-gray-600 text-3xl mb-2">audiotrack</span>
-                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">Load Instrumental</p>
+              <div className="py-6 flex flex-col items-center gap-3">
+                <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center group-hover:bg-purple-500/20 group-hover:scale-110 transition-all duration-300">
+                  <span className="material-icons-round text-gray-500 text-4xl group-hover:text-purple-500 transition-colors">cloud_upload</span>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-black text-gray-300 uppercase tracking-[0.1em]">Upload Audio</p>
+                  <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">MP3, WAV, M4A</p>
+                </div>
               </div>
             )}
-          </div>
+          </label>
         </div>
 
         {userState.instrumental && (
@@ -636,6 +809,18 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
         </header>
 
         <div className="flex-1 relative flex flex-col m-6 bg-[#121226]/80 rounded-[2rem] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-md">
+          {/* Punchline Notification */}
+          {punchline && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-500">
+              <div className="bg-purple-600/90 backdrop-blur-md text-white px-8 py-4 rounded-2xl shadow-2xl border border-white/20 flex items-center gap-4 max-w-md">
+                <span className="material-icons-round text-yellow-400">workspace_premium</span>
+                <p className="text-sm font-black tracking-tight leading-tight italic">"{punchline}"</p>
+                <button onClick={() => setPunchline(null)} className="text-white/50 hover:text-white transition-colors">
+                  <span className="material-icons-round text-sm">close</span>
+                </button>
+              </div>
+            </div>
+          )}
           {/* Notepad Toolbar */}
           <div className="h-14 bg-white/5 border-b border-white/10 flex items-center px-6 justify-between">
              <div className="flex gap-2">
@@ -681,6 +866,7 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
                   setSelectedWord(null);
                   setSavedRange(null);
                 }
+                handleSelection();
               }}
               placeholder="Texas heat cracklin'... Start spitting"
               className="absolute inset-0 w-full h-full bg-transparent p-10 text-2xl font-mono border-none focus:ring-0 resize-none text-gray-100 custom-scroll z-10 leading-[1.8] outline-none empty:before:content-[attr(placeholder)] empty:before:text-white/20"
@@ -717,6 +903,18 @@ const Studio: React.FC<Props> = ({ userState, lyrics, onNavigate, setLyrics, onS
           >
             <span className="material-icons-round text-xs">auto_awesome</span> Muse
           </button>
+          {activeTab === 'ai' && (
+            <button 
+              disabled={punchlineLoading}
+              onClick={handleGeneratePunchline}
+              className="px-3 py-3 bg-purple-600/20 text-purple-400 border border-purple-500/30 rounded-xl hover:bg-purple-600/30 transition-all flex items-center justify-center disabled:opacity-50"
+              title="Generate Punchline"
+            >
+              <span className={`material-icons-round text-sm ${punchlineLoading ? 'animate-spin' : ''}`}>
+                {punchlineLoading ? 'sync' : 'bolt'}
+              </span>
+            </button>
+          )}
           <button 
             onClick={() => {
               setActiveTab('rhymes');

@@ -2,16 +2,17 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Genre, LyricSuggestion, InstrumentalData, GENRE_PERSONAS } from "../types";
 
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAI = (apiKey?: string) => new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || '' });
 
 export const getLyricSuggestions = async (
   context: string,
   genre: Genre,
   instrumental?: InstrumentalData | null,
   artistMode?: boolean,
-  subPersonaId?: string
+  subPersonaId?: string,
+  apiKey?: string
 ): Promise<LyricSuggestion[]> => {
-  const ai = getAI();
+  const ai = getAI(apiKey);
   const bpm = instrumental?.bpm || 90;
   const key = instrumental?.key || "Unknown";
   const energy = instrumental?.energy || 50;
@@ -54,7 +55,7 @@ export const getLyricSuggestions = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
+      model: "gemini-3.1-pro-preview",
       contents: { parts: [{ text: prompt }] },
       config: {
         temperature: 0.9,
@@ -87,9 +88,10 @@ export const getRhymeSuggestions = async (
   word: string, 
   genre: Genre, 
   contextSnippet: string,
-  bpm?: number | null
+  bpm?: number | null,
+  apiKey?: string
 ): Promise<string[]> => {
-  const ai = getAI();
+  const ai = getAI(apiKey);
   if (!word || word.length < 2) return [];
 
   const genreInstructions: Record<Genre, string> = {
@@ -133,7 +135,7 @@ export const getRhymeSuggestions = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-latest",
+      model: "gemini-3-flash-preview",
       contents: { parts: [{ text: prompt }] },
       config: {
         temperature: 0.85,
@@ -151,8 +153,8 @@ export const getRhymeSuggestions = async (
   }
 };
 
-export const analyzeInstrumental = async (base64Audio: string, mimeType: string): Promise<any> => {
-  const ai = getAI();
+export const analyzeInstrumental = async (base64Audio: string, mimeType: string, apiKey?: string): Promise<any> => {
+  const ai = getAI(apiKey);
   
   // Comprehensive MIME type normalization for Gemini API compatibility
   let normalizedMime = mimeType.toLowerCase();
@@ -192,7 +194,7 @@ export const analyzeInstrumental = async (base64Audio: string, mimeType: string)
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-native-audio-preview-12-2025",
+      model: "gemini-3-flash-preview",
       contents: [{ 
         parts: [
           { inlineData: { mimeType: normalizedMime, data: base64Audio } }, 
@@ -221,5 +223,44 @@ export const analyzeInstrumental = async (base64Audio: string, mimeType: string)
   } catch (err) {
     console.error("Gemini Audio Analysis Error:", err);
     return null;
+  }
+};
+
+export const getPunchlineSuggestion = async (
+  context: string,
+  genre: Genre,
+  subPersonaId?: string,
+  apiKey?: string
+): Promise<string> => {
+  const ai = getAI(apiKey);
+  const genrePersonas = GENRE_PERSONAS[genre] || GENRE_PERSONAS[Genre.CUSTOM];
+  const selectedPersona = genrePersonas.find(p => p.id === subPersonaId) || genrePersonas[0];
+  const persona = `You are a ${selectedPersona.name}. ${selectedPersona.prompt}`;
+
+  const prompt = `
+    SYSTEM: ${persona}
+    
+    CURRENT LYRICAL CONTEXT: "${context}"
+    
+    TASK: Based on the current lyrics, generate ONE extremely clever, high-impact punchline or piece of wordplay that fits the style and context. 
+    The punchline should be sharp, unexpected, and memorable.
+    
+    Return ONLY the punchline text. No explanations, no quotes, no extra characters.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-pro-preview",
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        temperature: 1.0,
+        topP: 0.95,
+      }
+    });
+
+    return response.text?.trim() || "Couldn't think of a punchline right now.";
+  } catch (error) {
+    console.error("Punchline AI Error:", error);
+    return "AI is taking a breather. Try again in a second.";
   }
 };
